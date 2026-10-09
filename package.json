@@ -1,6 +1,9 @@
 {
   "name": "zotero-tagwiz",
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "version": "0.1.0",
   "description": "Bulk-clean Zotero tags: change case, unify, remove, and merge duplicates.",
   "config": {
