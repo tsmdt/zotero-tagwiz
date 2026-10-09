@@ -89,10 +89,11 @@ describe("engine (in Zotero)", function () {
   }
 
   async function makeCollection(parent?: Zotero.Collection) {
-    const collection = new Zotero.Collection();
-    collection.libraryID = libraryID;
-    collection.name = `${prefix}col${n++}`;
-    if (parent) collection.parentID = parent.id;
+    const collection = new Zotero.Collection({
+      libraryID,
+      name: `${prefix}col${n++}`,
+      parentID: parent?.id,
+    });
     await collection.saveTx();
     collectionsToErase.push(collection);
     return collection;
@@ -100,7 +101,14 @@ describe("engine (in Zotero)", function () {
 
   async function color(tag: string, value: string | false) {
     await Zotero.DB.executeTransaction(async () => {
-      await Zotero.Tags.setColor(libraryID, tag, value as string);
+      // Zotero clears the color for a falsy value and appends it without a
+      // position; its typings require both.
+      await Zotero.Tags.setColor(
+        libraryID,
+        tag,
+        value as string,
+        undefined as unknown as number,
+      );
     });
   }
 

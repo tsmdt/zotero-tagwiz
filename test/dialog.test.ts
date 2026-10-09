@@ -6,7 +6,7 @@ import {
 } from "../src/modules/menus";
 import { TagWizDialog } from "../src/ui/dialog";
 import { listJournalIDs, readJournal } from "../src/zotero/journal";
-import { typesOf } from "../src/zotero/tagStore";
+import { getColorList, typesOf } from "../src/zotero/tagStore";
 
 /**
  * UI tests: they open the real TagWiz window and drive the dialog through its
@@ -62,8 +62,23 @@ describe("dialog (in Zotero)", function () {
     (globalThis as any).addon ??= (Zotero as any)[config.addonInstance];
   });
 
+  async function setColor(tag: string, color: string | false) {
+    await Zotero.DB.executeTransaction(async () => {
+      // Falsy clears; no position appends. The typings require both.
+      await Zotero.Tags.setColor(
+        libraryID,
+        tag,
+        color as string,
+        undefined as unknown as number,
+      );
+    });
+  }
+
   afterEach(async function () {
     for (const win of windows.splice(0)) if (!win.closed) win.close();
+    for (const { name: tag } of getColorList(libraryID)) {
+      if (tag.startsWith(prefix)) await setColor(tag, false);
+    }
     for (const item of itemsToErase.splice(0)) {
       if (await Zotero.Items.getAsync(item.id)) await item.eraseTx();
     }
@@ -126,6 +141,28 @@ describe("dialog (in Zotero)", function () {
     const close = new win.Event("close", { cancelable: true });
     win.dispatchEvent(close);
     assert.isFalse(close.defaultPrevented);
+  });
+
+  it("a synced tag color cannot inject other CSS", async function () {
+    const [bad, good] = [name("css"), name("ok")];
+    await makeItem([bad, good]);
+    await setColor(bad, "red;background-image:url(https://example.invalid/x)");
+    await setColor(good, "#FF0000");
+    const { win, dialog } = await openDialog();
+    dialog.filter = prefix;
+    dialog.renderAll();
+
+    const swatches = [
+      ...win.document.querySelectorAll<HTMLElement>(".tc-swatch"),
+    ];
+    assert.lengthOf(swatches, 2);
+    for (const el of swatches) {
+      assert.notInclude(el.getAttribute("style") ?? "", "url(");
+      assert.equal(el.style.backgroundImage, "");
+    }
+    assert.isTrue(
+      swatches.some((el) => el.style.backgroundColor === "rgb(255, 0, 0)"),
+    );
   });
 
   describe("legacy menus", function () {

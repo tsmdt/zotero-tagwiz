@@ -626,13 +626,7 @@ export class TagWizDialog {
         doc,
         "td",
         { class: "tc-name" },
-        row.color
-          ? h(doc, "span", {
-              class: "tc-swatch",
-              style: `background:${row.color}`,
-              title: getString("flag-color"),
-            })
-          : null,
+        row.color ? swatch(doc, row.color) : null,
         row.name,
         row.auto
           ? h(doc, "span", { class: "tc-badge" }, getString("flag-auto"))
@@ -1282,6 +1276,20 @@ export class TagWizDialog {
       await this.afterAction(started);
     }
   }
+}
+
+/**
+ * Color swatch. Tag colors come from a synced setting that other members of a
+ * group library can write, so the value is assigned as one property, never
+ * spliced into CSS text where it could add other declarations.
+ */
+function swatch(doc: Document, color: string): HTMLElement {
+  const el = h(doc, "span", {
+    class: "tc-swatch",
+    title: getString("flag-color"),
+  });
+  el.style.backgroundColor = color;
+  return el;
 }
 
 function errorText(e: unknown): string {

@@ -6,16 +6,44 @@ on:
       - v**
 
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
+  contents: read
 
 jobs:
-  create-release:
-    uses: zotero-plugin-dev/workflows/.github/workflows/release-plugin.yml@main
-    # You can customize any of the inputs here.
-    # If you omit an input, its default value will be used.
-    with:
-      build: "npm run build"
-      release: "npm run release"
-    secrets: inherit
+  # Never publish a build that fails lint, unit or Zotero tests.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  # Inlined from zotero-plugin-dev/workflows release-plugin.yml (v1.1.0) so it
+  # can pin Node and run after CI, without handing the reusable workflow every
+  # repository secret.
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Setup JS
+        uses: zotero-plugin-dev/workflows/setup-js@fdcc78c01af94cd1a25f88fcc529115d839867f1 # v1.1.0
+        with:
+          node-version: 24
+          fetch-all: true
+
+      - name: Build
+        run: npm run build
+
+      - name: Release to GitHub
+        run: npm run release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - run: sleep 1s
+
+      - name: Notify release
+        uses: apexskier/github-release-commenter@e7813a9625eabd79a875b4bc4046cfcae377ab34 # v1.4.1
+        continue-on-error: true
+        with:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+          comment-template: |
+            :rocket: _This ticket has been resolved in {release_tag}. See {release_link} for release notes._

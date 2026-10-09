@@ -97,14 +97,14 @@ npm start              # build, start Zotero with the plugin, reload on changes
 
 In `.env`, point `ZOTERO_PLUGIN_ZOTERO_BIN_PATH` at your Zotero binary and `ZOTERO_PLUGIN_PROFILE_PATH` at a **separate development profile** (create one with `zotero -p`). Never sign in to sync in that profile. To try the plugin on real data, copy `zotero.sqlite` into a separate folder, set `ZOTERO_PLUGIN_DATA_DIR` to it, and never use your live data directory. `.gitignore` already excludes `.env`, `*.sqlite` and `zotero-dev-data/`.
 
-| Command              | What it does                                                                                |
-| -------------------- | ------------------------------------------------------------------------------------------- |
-| `npm start`          | Run Zotero with the plugin loaded and hot reload                                            |
-| `npm run build`      | Production build and type check; writes `.scaffold/build/tag-wiz.xpi`                       |
-| `npm run test:unit`  | Unit tests of the pure logic in plain Node (fast)                                           |
-| `npm test`           | All tests inside Zotero, including the engine tests against a throwaway library             |
-| `npm run lint:check` | Prettier and ESLint                                                                         |
-| `npm run release`    | Bump the version, tag and push; the GitHub workflow builds and publishes (see the scaffold) |
+| Command              | What it does                                                                            |
+| -------------------- | --------------------------------------------------------------------------------------- |
+| `npm start`          | Run Zotero with the plugin loaded and hot reload                                        |
+| `npm run build`      | Production build and type check; writes `.scaffold/build/tag-wiz.xpi`                   |
+| `npm run test:unit`  | Unit tests of the pure logic in plain Node (fast)                                       |
+| `npm test`           | All tests inside Zotero, including the engine tests against a throwaway library         |
+| `npm run lint:check` | Prettier and ESLint                                                                     |
+| `npm run release`    | Bump the version, tag and push; the workflow runs all checks, then builds and publishes |
 
 If you build on one operating system and run Zotero on another from the same folder, run `npm install` on each: some dependencies ship platform-specific binaries.
 
