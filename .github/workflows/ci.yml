@@ -56,9 +56,10 @@ jobs:
       - name: Download Zotero ${{ env.ZOTERO_VERSION }}
         run: |
           mkdir -p "$RUNNER_TEMP/zotero"
-          curl -fsSL -o "$RUNNER_TEMP/zotero.tar.bz2" \
+          curl -fsSL -o "$RUNNER_TEMP/zotero.tar" \
             "https://www.zotero.org/download/client/dl?platform=linux-x86_64&version=${ZOTERO_VERSION}"
-          tar -xjf "$RUNNER_TEMP/zotero.tar.bz2" -C "$RUNNER_TEMP/zotero" --strip-components=1
+          file "$RUNNER_TEMP/zotero.tar"
+          tar -xf "$RUNNER_TEMP/zotero.tar" -C "$RUNNER_TEMP/zotero" --strip-components=1
           echo "ZOTERO_PLUGIN_ZOTERO_BIN_PATH=$RUNNER_TEMP/zotero/zotero" >> "$GITHUB_ENV"
       - name: Run Test
         run: npm run test
