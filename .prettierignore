@@ -5,3 +5,6 @@ node_modules
 package-lock.json
 yarn.lock
 pnpm-lock.yaml
+
+# Processing instructions here must stay one per line
+addon/content/dialog.xhtml

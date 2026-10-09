@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Setup JS
         uses: zotero-plugin-dev/workflows/setup-js@main
+        with:
+          node-version: 24
       - name: Run Lint
         run: npm run lint:check
 
@@ -26,6 +28,8 @@ jobs:
     steps:
       - name: Setup JS
         uses: zotero-plugin-dev/workflows/setup-js@main
+        with:
+          node-version: 24
       - name: Run Build
         run: npm run build
       - name: Upload build result
@@ -41,4 +45,6 @@ jobs:
     steps:
       - name: Setup JS
         uses: zotero-plugin-dev/workflows/setup-js@main
+        with:
+          node-version: 24
       - run: npm run test

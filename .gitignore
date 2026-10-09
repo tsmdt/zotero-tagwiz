@@ -14,3 +14,7 @@ tsconfig.tsbuildinfo
 .scaffold
 build
 logs
+zotero-dev-data/
+.dev/
+*.sqlite
+*.sqlite-journal
