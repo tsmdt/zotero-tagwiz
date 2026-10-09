@@ -14,7 +14,6 @@ tsconfig.tsbuildinfo
 .scaffold
 build
 logs
-# Local copies of Zotero data used for development: never commit
 zotero-dev-data/
 .dev/
 *.sqlite
