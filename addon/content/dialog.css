@@ -17,7 +17,7 @@ body {
   background: Canvas;
 }
 
-#tagcleaner-root {
+#tagwiz-root {
   display: flex;
   flex-direction: column;
   height: 100%;

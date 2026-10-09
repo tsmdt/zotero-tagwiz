@@ -1,7 +1,7 @@
-menuitem-collection-label = Clean Tags…
-menuitem-tools-label = Tag Cleaner…
+menuitem-collection-label = Open TagWiz
+menuitem-tools-label = Open TagWiz
 
-dialog-title = Tag Cleaner
+dialog-title = TagWiz
 dialog-no-library = Select a library or collection first.
 
 scope-collection = Tags used in “{ $collection }”
@@ -14,9 +14,9 @@ tab-unify = Unify
 tab-remove = Remove
 tab-duplicates = Duplicates
 
-filter-placeholder = Filter tags…
-select-shown = Select shown
-select-none = Select none
+filter-placeholder = Filter tags… 
+select-shown = Select All
+select-none = Deselect
 selected-count = { $count } selected
 tag-list-empty = No tags to show.
 col-tag = Tag

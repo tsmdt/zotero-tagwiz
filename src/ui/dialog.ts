@@ -87,7 +87,7 @@ function opKey(op: Op): string {
   return `${op.kind}\u0000${opName(op)}\u0000${op.kind === "rename" ? op.to : ""}\u0000${op.kind === "retype" ? type : ""}`;
 }
 
-export class TagCleanerDialog {
+export class TagWizDialog {
   private readonly doc: Document;
   private readonly root: HTMLElement;
   private readonly libraryID: number;
@@ -136,7 +136,7 @@ export class TagCleanerDialog {
     params: DialogParams,
   ) {
     this.doc = win.document;
-    this.root = this.doc.getElementById("tagcleaner-root") as HTMLElement;
+    this.root = this.doc.getElementById("tagwiz-root") as HTMLElement;
     this.libraryID = params.libraryID;
     this.collection = params.collection;
   }

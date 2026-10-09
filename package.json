@@ -1,14 +1,14 @@
 {
-  "name": "zotero-tag-cleaner",
+  "name": "zotero-tagwiz",
   "type": "module",
   "version": "0.1.0",
   "description": "Bulk-clean Zotero tags: change case, unify, remove, and merge duplicates.",
   "config": {
-    "addonName": "Zotero Tag Cleaner",
-    "addonID": "tagcleaner@tsmdt.github.io",
-    "addonRef": "tagcleaner",
-    "addonInstance": "TagCleaner",
-    "prefsPrefix": "extensions.zotero.tagcleaner"
+    "addonName": "TagWiz",
+    "addonID": "tagwiz@tsmdt.github.io",
+    "addonRef": "tagwiz",
+    "addonInstance": "TagWiz",
+    "prefsPrefix": "extensions.zotero.tagwiz"
   },
   "repository": {
     "type": "git",

@@ -40,7 +40,7 @@ export interface ApplyResult {
 
 function log(...args: unknown[]) {
   Zotero.debug(
-    `[TagCleaner] ${args.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(" ")}`,
+    `[TagWiz] ${args.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(" ")}`,
   );
 }
 

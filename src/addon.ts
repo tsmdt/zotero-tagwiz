@@ -13,7 +13,7 @@ class Addon {
     locale?: {
       current: any;
     };
-    /** The open Tag Cleaner window, if any. */
+    /** The open TagWiz window, if any. */
     dialog?: Window;
   };
   // Lifecycle hooks

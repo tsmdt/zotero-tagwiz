@@ -1,5 +1,5 @@
 import { getLocaleID, getString } from "../utils/locale";
-import { openTagCleaner } from "../ui/openDialog";
+import { openTagWiz } from "../ui/openDialog";
 
 const registered: string[] = [];
 
@@ -9,8 +9,7 @@ const hasMenuManager = () =>
     ?.registerMenu === "function";
 
 /**
- * Add "Clean Tags…" to the collection context menu and "Tag Cleaner…" to the
- * Tools menu. Uses Zotero.MenuManager (Zotero 8+); older versions fall back to
+ * Add "TagWiz" to the collection context menu and to the Tools menu. Uses Zotero.MenuManager (Zotero 8+); older versions fall back to
  * the toolkit's per-window menus (see registerLegacyMenus).
  */
 export function registerMenus() {
@@ -29,7 +28,7 @@ export function registerMenus() {
         {
           menuType: "menuitem",
           l10nID: getLocaleID(l10n),
-          onCommand: () => void openTagCleaner(),
+          onCommand: () => void openTagWiz(),
         },
       ],
     });
@@ -42,15 +41,15 @@ export function registerLegacyMenus() {
   if (hasMenuManager()) return;
   ztoolkit.Menu.register("collection", {
     tag: "menuitem",
-    id: "tagcleaner-menu-collection",
+    id: "tagwiz-menu-collection",
     label: getString("menuitem-collection-label"),
-    commandListener: () => void openTagCleaner(),
+    commandListener: () => void openTagWiz(),
   });
   ztoolkit.Menu.register("menuTools", {
     tag: "menuitem",
-    id: "tagcleaner-menu-tools",
+    id: "tagwiz-menu-tools",
     label: getString("menuitem-tools-label"),
-    commandListener: () => void openTagCleaner(),
+    commandListener: () => void openTagWiz(),
   });
 }
 
