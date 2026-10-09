@@ -1,6 +1,4 @@
-# Labels for menus registered with Zotero.MenuManager (looked up in the main window).
-# The build prefixes every id with the add-on ref, so do not add it here.
 menu-collection =
-    .label = TagWiz
+    .label = Open TagWiz
 menu-tools =
-    .label = TagWiz
+    .label = Open TagWiz
