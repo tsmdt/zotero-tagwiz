@@ -90,6 +90,22 @@ describe("duplicates", function () {
         0,
       );
     });
+
+    it("keeps the manual variant of the winning name even if it is used less", function () {
+      const pick = pickCanonical([
+        t("x", 9, { type: 1 }),
+        t("x", 3, { type: 0 }),
+        t("X", 5),
+      ]);
+      assert.equal(pick.name, "x");
+      assert.equal(pick.type, 0);
+    });
+
+    it("may still pick an automatic tag when its name has no manual variant", function () {
+      const pick = pickCanonical([t("ML", 9, { type: 1 }), t("ml", 2)]);
+      assert.equal(pick.name, "ML");
+      assert.equal(pick.type, 1);
+    });
   });
 
   describe("fuzzy suggestions", function () {

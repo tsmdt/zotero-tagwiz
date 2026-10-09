@@ -1,4 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>zotero-plugin-dev/renovate-config"]
+  "extends": [
+    "github>zotero-plugin-dev/renovate-config",
+    "helpers:pinGitHubActionDigests"
+  ]
 }

@@ -9,7 +9,7 @@ scope-library = All tags in “{ $library }”
 include-subcollections = Include subcollections
 edits-library-wide = Changes always apply to the whole library, not only to this collection.
 
-tab-case = Change case
+tab-case = Change Case
 tab-unify = Unify
 tab-remove = Remove
 tab-duplicates = Duplicates
@@ -19,6 +19,7 @@ select-shown = Select All
 select-none = Deselect
 selected-count = { $count } selected
 tag-list-empty = No tags to show.
+tag-list-more = Showing the first { $shown } of { $total } tags. Use the filter to find the others.
 col-tag = Tag
 col-items = Library
 col-in-collection = Collection
@@ -56,6 +57,7 @@ dup-fuzzy-more = Showing the first { $shown } of { $total }.
 
 preview-title = Preview
 preview-empty = Nothing to change.
+preview-more = Showing the first { $shown } of { $total } changes. All of them are applied.
 preview-col-change = Change
 preview-col-items = Items
 preview-col-notes = Notes
@@ -82,12 +84,15 @@ confirm-body = Apply { $changes } changes to { $items } items in the library ({ 
     A snapshot is saved first, so “Undo last run” can restore the previous state.
 sync-warning = A sync is running. Changing tags now may be overwritten or conflict.
 status-working = Applying change { $done } of { $total }…
-status-done = Done: { $done } of { $total } changes applied.
+status-done = Done: { $done } of { $total } changes (already) applied.
 status-cancelled = Cancelled after { $done } of { $total } changes. You can undo what was applied.
 status-failed = Stopped after { $done } of { $total } changes: { $error }. You can undo what was applied.
 status-error = Could not apply: { $error }
+status-closing = Stopping after the current change, then closing…
+error-load = Could not load the tags: { $error }
 
 undo-confirm = Restore the tags changed by the last run to how they were before?
+undo-interrupted = The last run was interrupted, so TagWiz cannot tell whether its tags were changed again afterwards. Restore them to how they were before that run anyway?
 undo-drifted = These tags changed after the last run: { $tags }. Restoring now would overwrite those newer changes. Restore anyway?
 undo-done = Restored { $count } tags.
 undo-none = There is nothing to undo.

@@ -1,3 +1,8 @@
 {
-  "extends": "../tsconfig.json"
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["zotero-types/entries/sandbox", "mocha"]
+  },
+  // An inherited "include" resolves against the base file, so list it here.
+  "include": ["./**/*.ts", "../src", "../typings"]
 }

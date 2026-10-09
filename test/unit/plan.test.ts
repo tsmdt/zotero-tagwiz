@@ -50,6 +50,13 @@ describe("plan", function () {
       assert.isTrue(plan.rows.every((r) => r.merges));
     });
 
+    it("does not flag a merge for one name that exists as manual and automatic", function () {
+      const all = [t("foo bar", 3), t("foo bar", 9, { type: 1 })];
+      const plan = buildCasePlan(all, { style: "title" }, all);
+      assert.lengthOf(plan.rows, 2);
+      assert.isTrue(plan.rows.every((r) => !r.merges));
+    });
+
     it("blocks empty results", function () {
       const all = [t("---")];
       const plan = buildCasePlan(all, { style: "camel" }, all);
@@ -101,6 +108,18 @@ describe("plan", function () {
       const rename = plan.rows.find((r) => r.op.kind === "rename")!;
       assert.isTrue(rename.merges);
       assert.equal((rename.op as { to: string }).to, "Foo");
+    });
+
+    it("never turns manual tags automatic by default", function () {
+      const all = [t("x", 3), t("x", 9, { type: 1 })];
+      const groups = findDuplicateGroups(all, "exact");
+      const plan = buildDuplicatePlan(groups, all);
+      assert.lengthOf(plan.rows, 1);
+      assert.deepEqual(plan.rows[0].op, {
+        kind: "retype",
+        tag: all[1],
+        toType: 0,
+      });
     });
 
     it("honours the user's canonical choice", function () {

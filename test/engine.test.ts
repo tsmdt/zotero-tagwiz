@@ -4,6 +4,7 @@ import type { Op, TagRef, TagType } from "../src/core/types";
 import { applyOps, undoJournal } from "../src/zotero/engine";
 import { preflight } from "../src/zotero/guard";
 import {
+  latestUndoable,
   listJournalIDs,
   newJournalID,
   readJournal,
@@ -88,10 +89,11 @@ describe("engine (in Zotero)", function () {
   }
 
   async function makeCollection(parent?: Zotero.Collection) {
-    const collection = new Zotero.Collection();
-    collection.libraryID = libraryID;
-    collection.name = `${prefix}col${n++}`;
-    if (parent) collection.parentID = parent.id;
+    const collection = new Zotero.Collection({
+      libraryID,
+      name: `${prefix}col${n++}`,
+      parentID: parent?.id,
+    });
     await collection.saveTx();
     collectionsToErase.push(collection);
     return collection;
@@ -99,7 +101,14 @@ describe("engine (in Zotero)", function () {
 
   async function color(tag: string, value: string | false) {
     await Zotero.DB.executeTransaction(async () => {
-      await Zotero.Tags.setColor(libraryID, tag, value as string);
+      // Zotero clears the color for a falsy value and appends it without a
+      // position; its typings require both.
+      await Zotero.Tags.setColor(
+        libraryID,
+        tag,
+        value as string,
+        undefined as unknown as number,
+      );
     });
   }
 
@@ -508,6 +517,82 @@ describe("engine (in Zotero)", function () {
         assert.isFalse(later.hasTag(y));
       },
     );
+
+    itx(
+      "a throwing progress callback neither stops the run nor loses the snapshot",
+      async function () {
+        const [a, b, c, d] = [name("pa"), name("pb"), name("pc"), name("pd")];
+        await makeItem([a]);
+        await makeItem([c]);
+        const allTags = await loadTags(libraryID);
+        let calls = 0;
+        const result = await applyOps({
+          libraryID,
+          allTags,
+          ops: [
+            { kind: "rename", from: await ref(a), to: b },
+            { kind: "rename", from: await ref(c), to: d },
+          ],
+          onProgress: () => {
+            calls++;
+            throw new TypeError("can't access dead object");
+          },
+        });
+
+        assert.equal(calls, 2);
+        assert.equal(result.status, "done");
+        assert.equal(result.completedTasks, 2);
+        assert.deepEqual(await typesOf(libraryID, d), [0]);
+        const journal = await readJournal(result.journalId);
+        assert.equal(journal.status, "done");
+        assert.exists(journal.after);
+        assert.isTrue((await undoJournal(result.journalId)).ok);
+        assert.deepEqual(await typesOf(libraryID, a), [0]);
+      },
+    );
+
+    itx(
+      "undoes an interrupted run (no after snapshot) only when forced",
+      async function () {
+        const [x, y] = [name("ix"), name("iy")];
+        const item = await makeItem([x]);
+        const result = await rename(x, y);
+        // Simulate a crash right after the first task.
+        const journal = await readJournal(result.journalId);
+        journal.status = "running";
+        delete journal.after;
+        await writeJournal(journal);
+
+        const latest = await latestUndoable(libraryID);
+        assert.equal(latest?.id, result.journalId);
+        const refused = await undoJournal(result.journalId);
+        assert.deepEqual(refused, { ok: false, reason: "interrupted" });
+        assert.isTrue(item.hasTag(y));
+
+        const forced = await undoJournal(result.journalId, { force: true });
+        assert.isTrue(forced.ok);
+        assert.isTrue(item.hasTag(x));
+        assert.isFalse(item.hasTag(y));
+      },
+    );
+
+    itx("skips unreadable journal files", async function () {
+      const [x, y] = [name("jx"), name("jy")];
+      await makeItem([x]);
+      const result = await rename(x, y);
+      const broken = PathUtils.join(
+        Zotero.DataDirectory.dir,
+        "tagwiz",
+        `${newJournalID()}-broken.json`,
+      );
+      await IOUtils.writeUTF8(broken, '{"version": 1, "id": "trunc');
+      try {
+        const latest = await latestUndoable(libraryID);
+        assert.equal(latest?.id, result.journalId);
+      } finally {
+        await IOUtils.remove(broken, { ignoreAbsent: true });
+      }
+    });
   });
 
   describe("tagStore", function () {

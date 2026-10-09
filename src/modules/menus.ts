@@ -36,21 +36,61 @@ export function registerMenus() {
   }
 }
 
-/** Only needed where Zotero.MenuManager does not exist. Untested on Zotero 7. */
-export function registerLegacyMenus() {
+/** Menu items added per window where Zotero.MenuManager does not exist. */
+const legacyItems = new Map<Window, Element[]>();
+
+const LEGACY_TARGETS = [
+  [
+    "zotero-collectionmenu",
+    "tagwiz-menu-collection",
+    "menuitem-collection-label",
+  ],
+  ["menu_ToolsPopup", "tagwiz-menu-tools", "menuitem-tools-label"],
+] as const;
+
+/**
+ * Fallback for Zotero versions without Zotero.MenuManager: add the menu items
+ * to this window only, tracked per window so that closing one main window
+ * does not touch the menus of another.
+ */
+export function registerLegacyMenus(win: Window) {
   if (hasMenuManager()) return;
-  ztoolkit.Menu.register("collection", {
-    tag: "menuitem",
-    id: "tagwiz-menu-collection",
-    label: getString("menuitem-collection-label"),
-    commandListener: () => void openTagWiz(),
-  });
-  ztoolkit.Menu.register("menuTools", {
-    tag: "menuitem",
-    id: "tagwiz-menu-tools",
-    label: getString("menuitem-tools-label"),
-    commandListener: () => void openTagWiz(),
-  });
+  addLegacyMenuItems(win);
+}
+
+/** Exported for tests, which run on Zotero versions that have MenuManager. */
+export function addLegacyMenuItems(win: Window) {
+  if (legacyItems.has(win)) return;
+  const doc = win.document;
+  const items: Element[] = [];
+  for (const [popupID, id, label] of LEGACY_TARGETS) {
+    const popup = doc.getElementById(popupID);
+    if (!popup) continue;
+    const item = (
+      doc as Document & { createXULElement(tag: string): Element }
+    ).createXULElement("menuitem");
+    item.id = id;
+    item.setAttribute("label", getString(label));
+    item.addEventListener("command", () => void openTagWiz());
+    popup.appendChild(item);
+    items.push(item);
+  }
+  legacyItems.set(win, items);
+}
+
+/** Remove the fallback items of `win`, or of every window. */
+export function unregisterLegacyMenus(win?: Window) {
+  for (const [w, items] of legacyItems) {
+    if (win && w !== win) continue;
+    for (const item of items) {
+      try {
+        item.remove();
+      } catch {
+        // the window is already gone
+      }
+    }
+    legacyItems.delete(w);
+  }
 }
 
 export function unregisterMenus() {

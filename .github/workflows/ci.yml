@@ -7,44 +7,58 @@ on:
   pull_request:
     branches:
       - main
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  ZOTERO_VERSION: "10.0.6"
 
 jobs:
   lint:
     runs-on: ubuntu-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.GitHub_TOKEN }}
     steps:
       - name: Setup JS
-        uses: zotero-plugin-dev/workflows/setup-js@main
+        uses: zotero-plugin-dev/workflows/setup-js@fdcc78c01af94cd1a25f88fcc529115d839867f1 # v1.1.0
         with:
           node-version: 24
+          persist-credentials: false
       - name: Run Lint
         run: npm run lint:check
+      - name: Run Unit Tests
+        run: npm run test:unit
 
   build:
     runs-on: ubuntu-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.GitHub_TOKEN }}
     steps:
       - name: Setup JS
-        uses: zotero-plugin-dev/workflows/setup-js@main
+        uses: zotero-plugin-dev/workflows/setup-js@fdcc78c01af94cd1a25f88fcc529115d839867f1 # v1.1.0
         with:
           node-version: 24
+          persist-credentials: false
       - name: Run Build
         run: npm run build
       - name: Upload build result
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: build-result
           path: .scaffold/build
 
   test:
     runs-on: ubuntu-latest
-    needs:
-      - build
     steps:
       - name: Setup JS
-        uses: zotero-plugin-dev/workflows/setup-js@main
+        uses: zotero-plugin-dev/workflows/setup-js@fdcc78c01af94cd1a25f88fcc529115d839867f1 # v1.1.0
         with:
           node-version: 24
-      - run: npm run test
+          persist-credentials: false
+      - name: Download Zotero ${{ env.ZOTERO_VERSION }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/zotero"
+          curl -fsSL -o "$RUNNER_TEMP/zotero.tar.bz2" \
+            "https://www.zotero.org/download/client/dl?platform=linux-x86_64&version=${ZOTERO_VERSION}"
+          tar -xjf "$RUNNER_TEMP/zotero.tar.bz2" -C "$RUNNER_TEMP/zotero" --strip-components=1
+          echo "ZOTERO_PLUGIN_ZOTERO_BIN_PATH=$RUNNER_TEMP/zotero/zotero" >> "$GITHUB_ENV"
+      - name: Run Test
+        run: npm run test

@@ -47,10 +47,15 @@ function finalize(rows: PlanRow[], allTags: readonly TagRef[]): ChangePlan {
       .filter((r) => r.op.kind === "rename" || r.op.kind === "remove")
       .map((r) => sourceNameOf(r.op)),
   );
-  const targetCounts = new Map<string, number>();
+  // Distinct source names per target: the manual and automatic rows of one
+  // name renamed together are a single source, not a merge.
+  const sourcesByTarget = new Map<string, Set<string>>();
   for (const r of rows) {
     const to = targetOf(r.op);
-    if (to !== null) targetCounts.set(to, (targetCounts.get(to) ?? 0) + 1);
+    if (to === null) continue;
+    const sources = sourcesByTarget.get(to) ?? new Set<string>();
+    sources.add(sourceNameOf(r.op));
+    sourcesByTarget.set(to, sources);
   }
 
   for (const r of rows) {
@@ -62,7 +67,7 @@ function finalize(rows: PlanRow[], allTags: readonly TagRef[]): ChangePlan {
     } else if (movedAway.has(to) && sourceNameOf(r.op) !== to) {
       // A -> B while B itself is renamed/removed: result would depend on order.
       r.error = "target-is-also-changed";
-    } else if (existing.has(to) || (targetCounts.get(to) ?? 0) > 1) {
+    } else if (existing.has(to) || (sourcesByTarget.get(to)?.size ?? 0) > 1) {
       r.merges = true;
     }
     if (r.error) r.included = false;

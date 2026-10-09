@@ -3,6 +3,7 @@ import {
   DuplicateGroup,
   findDuplicateGroups,
   findFuzzyPairs,
+  type FuzzyPair,
 } from "../core/duplicates";
 import type { DuplicateTier } from "../core/normalize";
 import {
@@ -26,6 +27,7 @@ import { latestUndoable } from "../zotero/journal";
 import { loadTags, measureImpact, type Scope } from "../zotero/tagStore";
 import { FluentMessageId } from "../../typings/i10n";
 import { getString } from "../utils/locale";
+import { isWindowAlive } from "../utils/window";
 import { append, clear, h } from "./dom";
 
 export interface DialogParams {
@@ -57,6 +59,10 @@ interface DisplayRow {
 }
 
 const MAX_FUZZY = 100;
+/** Rows rendered at most in the tag list and the preview (all still apply). */
+const MAX_ROWS = 1000;
+const FILTER_DELAY = 150;
+const IMPACT_DELAY = 250;
 const CASE_STYLES: Array<[CaseStyle, FluentMessageId]> = [
   ["lower", "case-lower"],
   ["upper", "case-upper"],
@@ -114,16 +120,22 @@ export class TagWizDialog {
   private groups: DuplicateGroup[] = [];
   private groupOn = new Set<string>();
   private chosen = new Map<string, TagRef>();
+  /** Fuzzy pairs of the listed tags; computed on demand, reset by reload. */
+  private fuzzy?: FuzzyPair[];
 
   private plan: ChangePlan = { rows: [] };
   private busy = false;
   private cancelRequested = false;
+  /** The user tried to close the window during a run. */
+  private closeWhenDone = false;
   private status: { text: string; kind: "info" | "error" } = {
     text: "",
     kind: "info",
   };
   private impactText = "";
   private impactSeq = 0;
+  private impactTimer?: number;
+  private filterTimer?: number;
   private canUndo = false;
 
   private leftEl!: HTMLElement;
@@ -139,6 +151,11 @@ export class TagWizDialog {
     this.root = this.doc.getElementById("tagwiz-root") as HTMLElement;
     this.libraryID = params.libraryID;
     this.collection = params.collection;
+  }
+
+  /** False once the window is closed; its DOM must not be touched then. */
+  private get alive(): boolean {
+    return !!isWindowAlive(this.win);
   }
 
   private libraryName(): string {
@@ -165,12 +182,36 @@ export class TagWizDialog {
     } else if (!library.editable) {
       this.setStatus(getString("error-read-only"), "error");
     }
+    // Closing mid-run would abandon the run with no UI: stop at the next task
+    // boundary instead, then close.
+    this.win.addEventListener("close", (e: Event) => {
+      if (!this.busy) return;
+      e.preventDefault();
+      this.closeWhenDone = true;
+      this.cancelRequested = true;
+      this.setStatus(getString("status-closing"));
+    });
     this.buildSkeleton();
     await this.reload();
   }
 
   /** Re-read tags from the database and redraw everything. */
   private async reload() {
+    if (!this.alive) return;
+    try {
+      await this.loadData();
+    } catch (e) {
+      Zotero.logError(e as Error);
+      this.setStatus(
+        getString("error-load", { args: { error: errorText(e) } }),
+        "error",
+      );
+      return;
+    }
+    if (this.alive) this.renderAll();
+  }
+
+  private async loadData() {
     this.allTags = await loadTags(this.libraryID);
     const scoped = this.scope ? await loadTags(this.libraryID, this.scope) : [];
     const listed = this.scope ? scoped : this.allTags;
@@ -206,8 +247,8 @@ export class TagWizDialog {
       if (!existing.has(name)) this.selected.delete(name);
     }
     this.canUndo = !!(await latestUndoable(this.libraryID));
+    this.fuzzy = undefined;
     this.recomputeGroups();
-    this.renderAll();
   }
 
   private selectedRefs(): TagRef[] {
@@ -289,7 +330,20 @@ export class TagWizDialog {
     this.plan = this.computePlan();
     this.renderPreview();
     this.renderFooter();
-    void this.updateImpact();
+    this.scheduleImpact();
+  }
+
+  /** Impact needs a DB query: run it once the selection has settled. */
+  private scheduleImpact() {
+    this.win.clearTimeout(this.impactTimer);
+    if (!includedOps(this.plan).length) {
+      void this.updateImpact();
+      return;
+    }
+    this.impactTimer = this.win.setTimeout(
+      () => void this.updateImpact(),
+      IMPACT_DELAY,
+    );
   }
 
   private async updateImpact() {
@@ -313,7 +367,7 @@ export class TagWizDialog {
           })
         : getString("impact-library", { args: { total: impact.total } });
     }
-    if (seq === this.impactSeq) this.renderFooter();
+    if (seq === this.impactSeq && this.alive) this.renderFooter();
   }
 
   // ----------------------------------------------------------- render
@@ -451,6 +505,8 @@ export class TagWizDialog {
     };
     updateCount();
 
+    const tbody = h(doc, "tbody");
+    const more = h(doc, "div", { class: "tc-note tc-empty", hidden: true });
     const toolbar = h(
       doc,
       "div",
@@ -461,7 +517,11 @@ export class TagWizDialog {
         value: this.filter,
         oninput: (e: Event) => {
           this.filter = (e.target as HTMLInputElement).value;
-          this.fillRows(tbody, updateCount);
+          this.win.clearTimeout(this.filterTimer);
+          this.filterTimer = this.win.setTimeout(
+            () => this.fillRows(tbody, updateCount, more),
+            FILTER_DELAY,
+          );
         },
       }),
       h(
@@ -471,7 +531,7 @@ export class TagWizDialog {
           type: "button",
           onclick: () => {
             for (const r of this.visibleRows()) this.selected.add(r.name);
-            this.fillRows(tbody, updateCount);
+            this.fillRows(tbody, updateCount, more);
             this.selectionChanged();
           },
         },
@@ -484,7 +544,7 @@ export class TagWizDialog {
           type: "button",
           onclick: () => {
             this.selected.clear();
-            this.fillRows(tbody, updateCount);
+            this.fillRows(tbody, updateCount, more);
             this.selectionChanged();
           },
         },
@@ -493,7 +553,6 @@ export class TagWizDialog {
       countEl,
     );
 
-    const tbody = h(doc, "tbody");
     const table = h(
       doc,
       "table",
@@ -516,17 +575,26 @@ export class TagWizDialog {
       ),
       tbody,
     );
-    this.fillRows(tbody, updateCount);
+    this.fillRows(tbody, updateCount, more);
     append(this.leftEl, [
       toolbar,
-      h(doc, "div", { class: "tc-scroll" }, table),
+      h(doc, "div", { class: "tc-scroll" }, table, more),
     ]);
   }
 
-  private fillRows(tbody: HTMLElement, updateCount: () => void) {
+  private fillRows(
+    tbody: HTMLElement,
+    updateCount: () => void,
+    more: HTMLElement,
+  ) {
     const { doc } = this;
     clear(tbody);
-    const rows = this.visibleRows();
+    const all = this.visibleRows();
+    const rows = all.slice(0, MAX_ROWS);
+    more.hidden = all.length <= MAX_ROWS;
+    more.textContent = getString("tag-list-more", {
+      args: { shown: MAX_ROWS, total: all.length },
+    });
     if (!rows.length) {
       tbody.appendChild(
         h(
@@ -558,13 +626,7 @@ export class TagWizDialog {
         doc,
         "td",
         { class: "tc-name" },
-        row.color
-          ? h(doc, "span", {
-              class: "tc-swatch",
-              style: `background:${row.color}`,
-              title: getString("flag-color"),
-            })
-          : null,
+        row.color ? swatch(doc, row.color) : null,
         row.name,
         row.auto
           ? h(doc, "span", { class: "tc-badge" }, getString("flag-auto"))
@@ -770,7 +832,8 @@ export class TagWizDialog {
     }
 
     // Suggest-only: never part of the plan unless the user sends them to Unify.
-    const pairs = findFuzzyPairs(this.listedRefs());
+    this.fuzzy ??= findFuzzyPairs(this.listedRefs());
+    const pairs = this.fuzzy;
     if (pairs.length) {
       scroll.appendChild(
         h(
@@ -874,7 +937,7 @@ export class TagWizDialog {
       return;
     }
     const tbody = h(doc, "tbody");
-    for (const row of rows) {
+    for (const row of rows.slice(0, MAX_ROWS)) {
       const box = h(doc, "input", {
         type: "checkbox",
         checked: row.included && !row.blocked,
@@ -919,7 +982,22 @@ export class TagWizDialog {
     );
     append(this.previewEl, [
       head,
-      h(doc, "div", { class: "tc-scroll" }, table),
+      h(
+        doc,
+        "div",
+        { class: "tc-scroll" },
+        table,
+        rows.length > MAX_ROWS
+          ? h(
+              doc,
+              "div",
+              { class: "tc-note tc-empty" },
+              getString("preview-more", {
+                args: { shown: MAX_ROWS, total: rows.length },
+              }),
+            )
+          : null,
+      ),
     ]);
   }
 
@@ -1048,7 +1126,7 @@ export class TagWizDialog {
 
   private setStatus(text: string, kind: "info" | "error" = "info") {
     this.status = { text, kind };
-    if (this.footerEl) this.renderFooter();
+    if (this.footerEl && this.alive) this.renderFooter();
   }
 
   // ---------------------------------------------------------- actions
@@ -1069,36 +1147,40 @@ export class TagWizDialog {
   private async apply() {
     const ops = includedOps(this.plan);
     if (!ops.length || this.busy) return;
-    const guard = preflight(this.libraryID);
-    if (!guard.ok) {
-      this.setStatus(this.guardMessage(guard.reason), "error");
-      return;
-    }
-    const names = [
-      ...new Set(
-        ops.flatMap((op) =>
-          op.kind === "rename" ? [op.from.name, op.to] : [op.tag.name],
-        ),
-      ),
-    ];
-    const impact = await measureImpact(this.libraryID, names, this.scope);
-    let text = getString("confirm-body", {
-      args: {
-        changes: ops.length,
-        items: impact.total,
-        outside: impact.outsideScope,
-      },
-    });
-    if (guard.warnings.includes("sync-in-progress"))
-      text += `\n\n${getString("sync-warning")}`;
-    if (!this.confirm(getString("confirm-title"), text)) return;
-
+    // Set before the first await so a second click cannot start another run.
     this.busy = true;
-    this.cancelRequested = false;
-    this.setStatus(
-      getString("status-working", { args: { done: 0, total: ops.length } }),
-    );
+    let started = false;
     try {
+      const guard = preflight(this.libraryID);
+      if (!guard.ok) {
+        this.setStatus(this.guardMessage(guard.reason), "error");
+        return;
+      }
+      const names = [
+        ...new Set(
+          ops.flatMap((op) =>
+            op.kind === "rename" ? [op.from.name, op.to] : [op.tag.name],
+          ),
+        ),
+      ];
+      const impact = await measureImpact(this.libraryID, names, this.scope);
+      let text = getString("confirm-body", {
+        args: {
+          changes: ops.length,
+          items: impact.total,
+          outside: impact.outsideScope,
+        },
+      });
+      if (guard.warnings.includes("sync-in-progress"))
+        text += `\n\n${getString("sync-warning")}`;
+      if (this.closeWhenDone || !this.confirm(getString("confirm-title"), text))
+        return;
+
+      started = true;
+      this.cancelRequested = false;
+      this.setStatus(
+        getString("status-working", { args: { done: 0, total: ops.length } }),
+      );
       const result = await applyOps({
         libraryID: this.libraryID,
         ops,
@@ -1121,45 +1203,59 @@ export class TagWizDialog {
       else this.setStatus(getString("status-failed", { args }), "error");
     } catch (e) {
       this.setStatus(
-        getString("status-error", {
-          args: { error: e instanceof Error ? e.message : String(e) },
-        }),
+        getString("status-error", { args: { error: errorText(e) } }),
         "error",
       );
     } finally {
       this.busy = false;
-      this.selected.clear();
-      this.excluded.clear();
-      this.targetTouched = false;
-      this.unifyTarget = "";
+      if (started) {
+        this.selected.clear();
+        this.excluded.clear();
+        this.targetTouched = false;
+        this.unifyTarget = "";
+      }
+      await this.afterAction(started);
+    }
+  }
+
+  /** Re-render after apply/undo, or close if the user asked to meanwhile. */
+  private async afterAction(changed: boolean) {
+    if (this.closeWhenDone) {
+      if (this.alive) this.win.close();
+    } else if (changed) {
       await this.reload();
+    } else if (this.alive) {
+      this.renderFooter();
     }
   }
 
   private async undo() {
     if (this.busy) return;
-    const journal = await latestUndoable(this.libraryID);
-    if (!journal) {
-      this.setStatus(getString("undo-none"));
-      return;
-    }
-    if (!this.confirm(getString("undo-last"), getString("undo-confirm")))
-      return;
     this.busy = true;
+    let started = false;
     try {
+      const journal = await latestUndoable(this.libraryID);
+      if (!journal) {
+        this.setStatus(getString("undo-none"));
+        return;
+      }
+      let text = getString("undo-confirm");
+      const guard = preflight(this.libraryID);
+      if (guard.ok && guard.warnings.includes("sync-in-progress"))
+        text += `\n\n${getString("sync-warning")}`;
+      if (this.closeWhenDone || !this.confirm(getString("undo-last"), text))
+        return;
+      started = true;
       let result = await undoJournal(journal.id);
-      if (!result.ok && result.reason === "drifted") {
-        const tags = result.driftedTags.slice(0, 10).join(", ");
-        if (
-          this.confirm(
-            getString("undo-last"),
-            getString("undo-drifted", { args: { tags } }),
-          )
-        ) {
-          result = await undoJournal(journal.id, { force: true });
-        } else {
-          return;
-        }
+      if (!result.ok && result.reason !== "already-undone") {
+        const question =
+          result.reason === "drifted"
+            ? getString("undo-drifted", {
+                args: { tags: result.driftedTags.slice(0, 10).join(", ") },
+              })
+            : getString("undo-interrupted");
+        if (!this.confirm(getString("undo-last"), question)) return;
+        result = await undoJournal(journal.id, { force: true });
       }
       if (result.ok)
         this.setStatus(
@@ -1172,14 +1268,30 @@ export class TagWizDialog {
         );
     } catch (e) {
       this.setStatus(
-        getString("status-error", {
-          args: { error: e instanceof Error ? e.message : String(e) },
-        }),
+        getString("status-error", { args: { error: errorText(e) } }),
         "error",
       );
     } finally {
       this.busy = false;
-      await this.reload();
+      await this.afterAction(started);
     }
   }
+}
+
+/**
+ * Color swatch. Tag colors come from a synced setting that other members of a
+ * group library can write, so the value is assigned as one property, never
+ * spliced into CSS text where it could add other declarations.
+ */
+function swatch(doc: Document, color: string): HTMLElement {
+  const el = h(doc, "span", {
+    class: "tc-swatch",
+    title: getString("flag-color"),
+  });
+  el.style.backgroundColor = color;
+  return el;
+}
+
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
