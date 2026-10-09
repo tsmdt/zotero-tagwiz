@@ -13,6 +13,8 @@ class Addon {
     locale?: {
       current: any;
     };
+    /** The open Tag Cleaner window, if any. */
+    dialog?: Window;
   };
   // Lifecycle hooks
   public hooks: typeof hooks;

@@ -1,11 +1,6 @@
-item-section-example1-head-text =
-    .label = Plugin Template: Item Info
-item-section-example1-sidenav-tooltip =
-    .tooltiptext = This is Plugin Template section (item info)
-item-section-example2-head-text =
-    .label = Plugin Template: Reader [{$status}]
-item-section-example2-sidenav-tooltip =
-    .tooltiptext = This is Plugin Template section (reader)
-item-section-example2-button-tooltip =
-    .tooltiptext = Unregister this section
-item-info-row-example-label = Example Row
+# Labels for menus registered with Zotero.MenuManager (looked up in the main window).
+# The build prefixes every id with the add-on ref, so do not add it here.
+menu-collection =
+    .label = Clean Tags…
+menu-tools =
+    .label = Tag Cleaner…

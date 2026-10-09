@@ -1,3 +1,8 @@
+import {
+  registerLegacyMenus,
+  registerMenus,
+  unregisterMenus,
+} from "./modules/menus";
 import { initLocale } from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
 
@@ -9,6 +14,13 @@ async function onStartup() {
   ]);
 
   initLocale();
+
+  try {
+    registerMenus();
+  } catch (e) {
+    // A menu problem must not keep the plugin from loading.
+    Zotero.logError(e as Error);
+  }
 
   await Promise.all(
     Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
@@ -26,6 +38,8 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
   win.MozXULElement.insertFTLIfNeeded(
     `${addon.data.config.addonRef}-mainWindow.ftl`,
   );
+
+  registerLegacyMenus();
 }
 
 async function onMainWindowUnload(_win: Window): Promise<void> {
@@ -33,6 +47,8 @@ async function onMainWindowUnload(_win: Window): Promise<void> {
 }
 
 function onShutdown(): void {
+  unregisterMenus();
+  addon.data.dialog?.close();
   ztoolkit.unregisterAll();
   // Remove addon object
   addon.data.alive = false;
