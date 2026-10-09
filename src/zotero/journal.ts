@@ -28,8 +28,31 @@ export interface Journal {
 
 const KEEP = 10;
 
+const DIR_NAME = "tagwiz";
+/** Folder used before the plugin was renamed to TagWiz. */
+const LEGACY_DIR_NAME = "tagcleaner";
+
 function dirPath(): string {
-  return PathUtils.join(Zotero.DataDirectory.dir, "tagcleaner");
+  return PathUtils.join(Zotero.DataDirectory.dir, DIR_NAME);
+}
+
+/**
+ * Move snapshots from the pre-rename folder into the current one, so undo
+ * keeps working across the rename. Existing files are never overwritten.
+ */
+async function migrateLegacyJournals(): Promise<void> {
+  const legacy = PathUtils.join(Zotero.DataDirectory.dir, LEGACY_DIR_NAME);
+  if (!(await IOUtils.exists(legacy))) return;
+  await IOUtils.makeDirectory(dirPath(), { ignoreExisting: true });
+  for (const path of (await IOUtils.getChildren(legacy)) as string[]) {
+    const target = PathUtils.join(dirPath(), PathUtils.filename(path));
+    if (!(await IOUtils.exists(target))) await IOUtils.move(path, target);
+  }
+  try {
+    await IOUtils.remove(legacy); // only succeeds if the folder is now empty
+  } catch {
+    // something is left behind; leave the folder alone
+  }
 }
 
 function filePath(id: string): string {
@@ -41,16 +64,19 @@ export function newJournalID(): string {
 }
 
 export async function writeJournal(journal: Journal): Promise<void> {
+  await migrateLegacyJournals();
   await IOUtils.makeDirectory(dirPath(), { ignoreExisting: true });
   await IOUtils.writeJSON(filePath(journal.id), journal);
 }
 
 export async function readJournal(id: string): Promise<Journal> {
+  await migrateLegacyJournals();
   return (await IOUtils.readJSON(filePath(id))) as Journal;
 }
 
 /** Newest first. */
 export async function listJournalIDs(): Promise<string[]> {
+  await migrateLegacyJournals();
   if (!(await IOUtils.exists(dirPath()))) return [];
   const children: string[] = await IOUtils.getChildren(dirPath());
   return children

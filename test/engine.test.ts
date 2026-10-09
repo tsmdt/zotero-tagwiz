@@ -189,6 +189,38 @@ describe("engine (in Zotero)", function () {
       assert.equal((await readJournal(id)).id, id);
       assert.include(await listJournalIDs(), id);
     });
+
+    itx(
+      "7. snapshots from the old tagcleaner folder are migrated",
+      async function () {
+        const legacyDir = PathUtils.join(
+          Zotero.DataDirectory.dir,
+          "tagcleaner",
+        );
+        await IOUtils.makeDirectory(legacyDir, { ignoreExisting: true });
+        const id = `${newJournalID()}-legacy`;
+        const legacyFile = PathUtils.join(legacyDir, `${id}.json`);
+        await IOUtils.writeJSON(legacyFile, {
+          version: 1,
+          id,
+          createdAt: "",
+          libraryID,
+          status: "done",
+          tasks: [],
+          completedTasks: 0,
+          before: [],
+        });
+
+        assert.include(await listJournalIDs(), id);
+        assert.isFalse(await IOUtils.exists(legacyFile));
+        assert.equal((await readJournal(id)).id, id);
+
+        await IOUtils.remove(
+          PathUtils.join(Zotero.DataDirectory.dir, "tagwiz", `${id}.json`),
+          { ignoreAbsent: true },
+        );
+      },
+    );
   });
 
   itx("preflight accepts the user library", function () {
