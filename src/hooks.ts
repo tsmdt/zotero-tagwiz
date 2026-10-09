@@ -1,10 +1,10 @@
 import {
   registerLegacyMenus,
   registerMenus,
+  unregisterLegacyMenus,
   unregisterMenus,
 } from "./modules/menus";
 import { initLocale } from "./utils/locale";
-import { createZToolkit } from "./utils/ztoolkit";
 
 async function onStartup() {
   await Promise.all([
@@ -32,22 +32,20 @@ async function onStartup() {
 }
 
 async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
-  // Create ztoolkit for every window
-  addon.data.ztoolkit = createZToolkit();
-
   win.MozXULElement.insertFTLIfNeeded(
     `${addon.data.config.addonRef}-mainWindow.ftl`,
   );
 
-  registerLegacyMenus();
+  registerLegacyMenus(win);
 }
 
-async function onMainWindowUnload(_win: Window): Promise<void> {
-  ztoolkit.unregisterAll();
+async function onMainWindowUnload(win: Window): Promise<void> {
+  unregisterLegacyMenus(win);
 }
 
 function onShutdown(): void {
   unregisterMenus();
+  unregisterLegacyMenus();
   addon.data.dialog?.close();
   ztoolkit.unregisterAll();
   // Remove addon object

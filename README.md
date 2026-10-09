@@ -72,7 +72,7 @@ Choose how strict the match is:
 - _Ignoring case_: `Machine Learning` and `machine learning`.
 - _Ignoring case, spaces, "-" and "\_"_: also treats `machine-learning`, `machine_learning`, `machineLearning` and accented variants as the same. Names that differ in other punctuation, such as `C++` and `C#`, are never grouped.
 
-Each group suggests a tag to keep: the most used one, and on a tie a colored one, then a manual one. Pick a different radio button to keep another spelling, or untick the group to skip it. Below the groups, **Possible typos and plurals** lists near-matches; **Unify…** sends a pair to the Unify tab, where you decide.
+Each group suggests a tag to keep: the most used one, and on a tie a colored one, then a manual one. If the suggested name also exists as a manual tag, the manual one is kept, so merging never turns manual tags into automatic ones unless you pick the automatic one yourself. Pick a different radio button to keep another spelling, or untick the group to skip it. Below the groups, **Possible typos and plurals** lists near-matches; **Unify…** sends a pair to the Unify tab, where you decide.
 
 ### Undo and snapshots
 
@@ -80,6 +80,7 @@ Before the first change of each run, TagWiz saves a snapshot of the affected tag
 
 - which items carry the tags, their manual or automatic type, and their colors;
 - only the most recent run can be undone, and each run only once;
+- a run that was interrupted (for example by a crash) can still be undone; since TagWiz then cannot tell whether the tags changed afterwards, it asks first;
 - if the tags were changed again after the run (for example by a sync), TagWiz lists them and asks before overwriting those newer changes.
 
 Edits do not touch an item's _Date Modified_, but Zotero marks the items as changed, so they sync like any other edit. Sync can overwrite or conflict with tags you change while it is running, so TagWiz warns if one is in progress. As with any bulk edit, keep a backup of your Zotero data before the first big run.

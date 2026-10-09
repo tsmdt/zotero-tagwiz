@@ -183,10 +183,15 @@ async function runTask(libraryID: number, task: Task) {
   }
 }
 
+function message(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 /**
  * Apply a plan's operations. Throws before changing anything if the preflight
- * checks or the task folding fail. Once started, task failures do not throw:
- * they stop the run and are reported in the result so the caller can offer undo.
+ * checks or the task folding fail. Once started, nothing throws: a failing
+ * task or journal write stops the run, a failing callback is only logged, and
+ * the result reports what happened so the caller can offer undo.
  */
 export async function applyOps(opts: ApplyOptions): Promise<ApplyResult> {
   const { libraryID } = opts;
@@ -220,22 +225,38 @@ export async function applyOps(opts: ApplyOptions): Promise<ApplyResult> {
     }
     try {
       await runTask(libraryID, task);
+      journal.completedTasks = i + 1;
+      await writeJournal(journal);
     } catch (e) {
       status = "failed";
-      error = e instanceof Error ? e.message : String(e);
+      error = message(e);
       log("task failed", task, error);
       break;
     }
-    journal.completedTasks = i + 1;
-    await writeJournal(journal);
-    opts.onProgress?.(i + 1, tasks.length, task);
+    try {
+      opts.onProgress?.(i + 1, tasks.length, task);
+    } catch (e) {
+      // e.g. the dialog was closed; the run itself must go on.
+      log("progress callback failed", message(e));
+    }
   }
 
   journal.status = status;
   journal.error = error;
-  journal.after = await captureStates(libraryID, names);
-  await writeJournal(journal);
-  await pruneJournals();
+  try {
+    journal.after = await captureStates(libraryID, names);
+    await writeJournal(journal);
+  } catch (e) {
+    // Without `after`, undo still works from `before` (see undoJournal).
+    log("could not finish the journal", message(e));
+    status = "failed";
+    error ??= message(e);
+  }
+  try {
+    await pruneJournals();
+  } catch (e) {
+    log("could not prune old journals", message(e));
+  }
 
   return {
     journalId: journal.id,
@@ -263,11 +284,14 @@ function sameState(a: TagState | undefined, b: TagState | undefined): boolean {
 export type UndoResult =
   | { ok: true; restoredTags: number }
   | { ok: false; reason: "drifted"; driftedTags: string[] }
-  | { ok: false; reason: "already-undone" | "no-snapshot" };
+  | { ok: false; reason: "interrupted" }
+  | { ok: false; reason: "already-undone" };
 
 /**
  * Restore the affected tags to their state before the run (membership, types,
  * colors). Refuses if those tags changed after the run, unless `force`.
+ * A run that was interrupted (crash, quit) has no `after` snapshot, so changes
+ * made since cannot be detected; it is only undone with `force`.
  */
 export async function undoJournal(
   journalID: string,
@@ -276,7 +300,8 @@ export async function undoJournal(
   const journal = await readJournal(journalID);
   if (journal.status === "undone")
     return { ok: false, reason: "already-undone" };
-  if (!journal.after) return { ok: false, reason: "no-snapshot" };
+  if (!journal.after && !opts.force)
+    return { ok: false, reason: "interrupted" };
 
   const guard = preflight(journal.libraryID);
   if (!guard.ok) throw new Error(`Cannot edit tags: ${guard.reason}`);
@@ -284,12 +309,14 @@ export async function undoJournal(
   const { libraryID } = journal;
   const names = journal.before.map((s) => s.name);
   const current = await captureStates(libraryID, names);
-  const afterByName = new Map(journal.after.map((s) => [s.name, s]));
-  const drifted = current
-    .filter((s) => !sameState(s, afterByName.get(s.name)))
-    .map((s) => s.name);
-  if (drifted.length && !opts.force) {
-    return { ok: false, reason: "drifted", driftedTags: drifted };
+  if (journal.after && !opts.force) {
+    const afterByName = new Map(journal.after.map((s) => [s.name, s]));
+    const drifted = current
+      .filter((s) => !sameState(s, afterByName.get(s.name)))
+      .map((s) => s.name);
+    if (drifted.length) {
+      return { ok: false, reason: "drifted", driftedTags: drifted };
+    }
   }
 
   // itemID -> (tag name -> type it must have afterwards, or null for "must not have")

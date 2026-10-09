@@ -18,10 +18,12 @@ export interface FuzzyPair {
 /**
  * Most-used first, then colored, then manual, then a stable name order
  * (prefers names containing uppercase, i.e. the "nicer" spelling, then lexical).
+ * If the winning name also exists as a manual tag, the manual one is returned,
+ * so merging never turns manual tags into automatic ones by default.
  */
 export function pickCanonical(members: readonly TagRef[]): TagRef {
   const hasUpper = (t: TagRef) => t.name !== t.name.toLowerCase();
-  return [...members].sort(
+  const best = [...members].sort(
     (x, y) =>
       y.itemCount - x.itemCount ||
       Number(!!y.color) - Number(!!x.color) ||
@@ -29,6 +31,7 @@ export function pickCanonical(members: readonly TagRef[]): TagRef {
       Number(hasUpper(y)) - Number(hasUpper(x)) ||
       (x.name < y.name ? -1 : x.name > y.name ? 1 : 0),
   )[0];
+  return members.find((m) => m.name === best.name && m.type === 0) ?? best;
 }
 
 /**
