@@ -1,28 +1,29 @@
 {
-  "name": "zotero-plugin-template",
+  "name": "zotero-tag-cleaner",
   "type": "module",
-  "version": "3.1.0",
-  "description": "Zotero Plugin Template",
+  "version": "0.1.0",
+  "description": "Bulk-clean Zotero tags: change case, unify, remove, and merge duplicates.",
   "config": {
-    "addonName": "Zotero Plugin Template",
-    "addonID": "addontemplate@euclpts.com",
-    "addonRef": "addontemplate",
-    "addonInstance": "AddonTemplate",
-    "prefsPrefix": "extensions.zotero.addontemplate"
+    "addonName": "Zotero Tag Cleaner",
+    "addonID": "tagcleaner@tsmdt.github.io",
+    "addonRef": "tagcleaner",
+    "addonInstance": "TagCleaner",
+    "prefsPrefix": "extensions.zotero.tagcleaner"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/windingwind/zotero-plugin-template.git"
+    "url": "git+https://github.com/tsmdt/zotero-tag-cleaner.git"
   },
-  "author": "windingwind",
+  "author": "tsmdt",
   "bugs": {
-    "url": "https://github.com/windingwind/zotero-plugin-template/issues"
+    "url": "https://github.com/tsmdt/zotero-tag-cleaner/issues"
   },
-  "homepage": "https://github.com/windingwind/zotero-plugin-template#readme",
+  "homepage": "https://github.com/tsmdt/zotero-tag-cleaner#readme",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "start": "zotero-plugin serve",
     "build": "zotero-plugin build && tsc --noEmit",
+    "test:unit": "mocha --import=tsx \"test/unit/**/*.test.ts\"",
     "lint:check": "prettier --check . && eslint .",
     "lint:fix": "prettier --write . && eslint . --fix",
     "release": "zotero-plugin release",
@@ -41,6 +42,7 @@
     "eslint": "^9.39.2",
     "mocha": "^11.7.5",
     "prettier": "^3.7.4",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "zotero-plugin-scaffold": "^0.8.2",
     "zotero-types": "^4.1.0-beta.4"
