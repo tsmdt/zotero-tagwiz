@@ -1,0 +1,112 @@
+import { assert } from "chai";
+import { convertCase } from "../../src/core/caseStyles";
+import type { CaseStyle } from "../../src/core/types";
+
+function c(name: string, style: CaseStyle, extra = {}) {
+  return convertCase(name, { style, ...extra });
+}
+
+describe("convertCase", function () {
+  it("lower / upper", function () {
+    assert.equal(c("Machine Learning", "lower"), "machine learning");
+    assert.equal(c("Machine Learning", "upper"), "MACHINE LEARNING");
+  });
+
+  it("title case keeps small words lowercase except first", function () {
+    assert.equal(c("the art of war", "title"), "The Art of War");
+    assert.equal(c("of mice and men", "title"), "Of Mice and Men");
+  });
+
+  it("title/sentence keep acronyms by default, optionally not", function () {
+    assert.equal(c("NLP methods", "title"), "NLP Methods");
+    assert.equal(
+      c("NLP methods", "title", { keepAcronyms: false }),
+      "Nlp Methods",
+    );
+    assert.equal(c("deep LEARNING", "sentence"), "Deep LEARNING");
+    assert.equal(
+      c("deep LEARNING", "sentence", { keepAcronyms: false }),
+      "Deep learning",
+    );
+  });
+
+  it("sentence case", function () {
+    assert.equal(
+      c("MACHINE LEARNING basics", "sentence", { keepAcronyms: false }),
+      "Machine learning basics",
+    );
+    assert.equal(c("machine Learning", "sentence"), "Machine learning");
+  });
+
+  it("camel / pascal / snake / kebab from mixed input", function () {
+    assert.equal(c("machine learning", "camel"), "machineLearning");
+    assert.equal(
+      c("machine_learning-models", "pascal"),
+      "MachineLearningModels",
+    );
+    assert.equal(c("machineLearning", "snake"), "machine_learning");
+    assert.equal(c("Machine Learning", "kebab"), "machine-learning");
+    assert.equal(c("HTTPServer error", "snake"), "http_server_error");
+  });
+
+  it("handles non-Latin scripts and diacritics", function () {
+    assert.equal(c("機械学習", "title"), "機械学習");
+    assert.equal(c("école normale", "title"), "École Normale");
+    assert.equal(c("ÉCOLE", "lower"), "école");
+  });
+
+  it("is locale independent (Turkish dotted I)", function () {
+    // JS toLowerCase is locale-independent: İ -> i + combining dot, never ı.
+    assert.equal(c("TITLE", "lower"), "title");
+    assert.notInclude(c("TITLE", "lower"), "ı");
+  });
+
+  it("preservePrefix leaves everything up to the last : or / alone", function () {
+    assert.equal(
+      c("topic:machine learning", "title", { preservePrefix: true }),
+      "topic:Machine Learning",
+    );
+    assert.equal(
+      c("Area/Sub Topic", "lower", { preservePrefix: true }),
+      "Area/sub topic",
+    );
+    assert.equal(
+      c("topic: foo bar", "title", { preservePrefix: true }),
+      "topic: Foo Bar",
+    );
+    assert.equal(c("topic:machine", "upper"), "TOPIC:MACHINE");
+  });
+
+  it("is idempotent for every style", function () {
+    const styles: CaseStyle[] = [
+      "lower",
+      "upper",
+      "title",
+      "sentence",
+      "camel",
+      "pascal",
+      "snake",
+      "kebab",
+    ];
+    for (const style of styles) {
+      for (const name of [
+        "Machine learning",
+        "NLP and the web",
+        "a_b-c d",
+        "x",
+      ]) {
+        const once = c(name, style);
+        assert.equal(c(once, style), once, `${style}: ${name}`);
+      }
+    }
+  });
+
+  it("returns empty string for separator-only identifiers", function () {
+    assert.equal(c("---", "camel"), "");
+    assert.equal(c("   ", "title"), "");
+  });
+
+  it("normalizes to NFC and trims", function () {
+    assert.equal(c("  école  ", "lower"), "école");
+  });
+});
