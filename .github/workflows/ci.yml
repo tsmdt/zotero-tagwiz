@@ -7,14 +7,12 @@ on:
   pull_request:
     branches:
       - main
-  # Lets release.yml run the same checks before publishing.
   workflow_call:
 
 permissions:
   contents: read
 
 env:
-  # Zotero version the tests run against; keep in sync with the README.
   ZOTERO_VERSION: "10.0.6"
 
 jobs:
@@ -55,7 +53,6 @@ jobs:
         with:
           node-version: 24
           persist-credentials: false
-      # Without this, the scaffold downloads whatever Zotero beta is current.
       - name: Download Zotero ${{ env.ZOTERO_VERSION }}
         run: |
           mkdir -p "$RUNNER_TEMP/zotero"
