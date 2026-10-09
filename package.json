@@ -12,13 +12,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tsmdt/zotero-tag-cleaner.git"
+    "url": "git+https://github.com/tsmdt/zotero-tagwiz.git"
   },
   "author": "tsmdt",
   "bugs": {
-    "url": "https://github.com/tsmdt/zotero-tag-cleaner/issues"
+    "url": "https://github.com/tsmdt/zotero-tagwiz/issues"
   },
-  "homepage": "https://github.com/tsmdt/zotero-tag-cleaner#readme",
+  "homepage": "https://github.com/tsmdt/zotero-tagwiz#readme",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "start": "zotero-plugin serve",
