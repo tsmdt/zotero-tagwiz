@@ -30,6 +30,8 @@
   --tw-muted: color-mix(in srgb, CanvasText 60%, transparent);
   --tw-hover: color-mix(in srgb, CanvasText 7%, transparent);
   --tw-band: color-mix(in srgb, CanvasText 5%, Canvas);
+  /* Inactive tabs, a shade darker than the band they sit behind */
+  --tw-tab-back: color-mix(in srgb, CanvasText 11%, Canvas);
   --tw-field: #fff;
   --tw-row: 30px;
   --tw-accent: AccentColor;
@@ -91,32 +93,39 @@ body {
 
 .tw-tabs {
   display: flex;
+  align-items: flex-end;
   gap: 2px;
 }
 
+/* Inactive tabs sit behind the band: darker, dimmer text, a little lower. */
 .tw-tab {
   appearance: none;
-  border: 1px solid transparent;
+  border: 1px solid var(--tw-border);
   border-bottom: none;
   border-radius: 6px 6px 0 0;
-  background: none;
-  color: inherit;
+  background: var(--tw-tab-back);
+  color: var(--tw-muted);
   font: inherit;
-  padding: 6px 14px;
+  margin-top: 3px;
+  padding: 5px 14px;
   cursor: pointer;
 }
 
 .tw-tab:hover {
-  background: var(--tw-hover);
+  background: var(--tw-band);
+  color: inherit;
 }
 
-/* The active tab merges into the options band below it. */
+/* The active tab is in front: taller, and it merges into the options band
+ * below it. */
 .tw-tab[aria-selected="true"] {
   position: relative;
-  border-color: var(--tw-border);
   background: var(--tw-band);
+  color: inherit;
   font-weight: 600;
+  margin-top: 0;
   margin-bottom: -1px;
+  padding-block: 7px 6px;
   border-bottom: 1px solid var(--tw-band);
 }
 
