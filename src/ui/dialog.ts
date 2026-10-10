@@ -502,15 +502,9 @@ export class TagWizDialog {
       this.leftEl,
       this.previewEl,
     );
-    const note = h(
-      doc,
-      "div",
-      { class: "tw-alert" },
-      getString("edits-library-wide"),
-    );
     this.footerEl = h(doc, "div", { class: "tw-footer" });
 
-    append(this.root, [header, menu, body, note, this.footerEl]);
+    append(this.root, [header, menu, body, this.footerEl]);
   }
 
   private renderAll() {
@@ -1066,7 +1060,7 @@ export class TagWizDialog {
       doc,
       "div",
       { class: "tw-pane-header" },
-      h(doc, "span", { class: "tw-pane-title" }, getString("preview-title")),
+      h(doc, "span", { class: "tw-alert" }, getString("edits-library-wide")),
     );
     if (!rows.length) {
       append(this.previewEl, [

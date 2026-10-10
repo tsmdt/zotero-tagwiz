@@ -63,7 +63,6 @@ export type FluentMessageId =
   | 'preview-col-notes'
   | 'preview-empty'
   | 'preview-more'
-  | 'preview-title'
   | 'remove-hint'
   | 'scope-collection'
   | 'scope-library'

@@ -7,7 +7,7 @@ dialog-no-library = Select a library or collection first.
 scope-collection = Tags used in “{ $collection }”
 scope-library = Showing all tags in “{ $library }”
 include-subcollections = Include subcollections
-edits-library-wide = → Changes always apply to the whole library, not only to this collection.
+edits-library-wide = Changes always apply to the whole library.
 
 tab-case = Change Case
 tab-unify = Merge
@@ -55,7 +55,6 @@ dup-fuzzy-reason-typo = typo?
 dup-fuzzy-reason-plural = plural?
 dup-fuzzy-more = Showing the first { $shown } of { $total }.
 
-preview-title = Preview
 preview-empty = Nothing to change.
 preview-more = Showing the first { $shown } of { $total } changes. All of them are applied.
 preview-col-change = Change
