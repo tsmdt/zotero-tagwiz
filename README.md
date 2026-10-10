@@ -1,13 +1,17 @@
 # TagWiz 🏷️
 
-TagWiz is a [Zotero](https://www.zotero.org/) plugin for cleaning up tags in bulk: change their case, merge or remove several at once, and find and merge duplicates.
+TagWiz is a tag editor for [Zotero](https://www.zotero.org/) that tames the sprawling tags in your library with a flick of its wand. 🧙‍♂️🔮
+
+In other words: its a plugin for cleaning up tags in bulk: change their case, rename them or merge multiple tags into one, remove several at once, and find and merge duplicates.
+
+<img src="./assets/tagwiz.png" alt="TagWiz" width="80%">
 
 ## Table of contents
 
 - [Installation](#installation)
 - [Usage](#usage)
   - [Change Case](#change-case)
-  - [Merge](#merge)
+  - [Rename & Merge](#rename--merge)
   - [Remove](#remove)
   - [Duplicates](#duplicates)
   - [Undo](#undo)
@@ -34,14 +38,14 @@ Pick a tab, select tags (the filter box helps with long lists), check the previe
 
 Choose a style: lower case, UPPER CASE, Title Case, Sentence case, camelCase, PascalCase, snake_case or kebab-case. For example, `machine learning` becomes `Machine Learning` in Title Case and `machine_learning` in snake_case. Two options refine the result:
 
-- **Keep ALL-CAPS words** (Title and Sentence case): `NLP methods` becomes `NLP Methods` instead of `Nlp Methods`.
-- **Keep the part before ":" or "/"**: in `topic:machine learning` only the part after the colon changes.
+- **Keep ALL-CAPS words**: words like `NLP` stay as they are in every style. `NLP methods` becomes `NLP Methods` in Title Case instead of `Nlp Methods`, and `LLM Framework Studies` becomes `LLMframeworkStudies` in camelCase.
+- **Keep prefix**: type a prefix such as `TECH: `, `00_` or `Aa-`. In tags that start with exactly this text (case-sensitive, spaces count), the prefix stays as typed and only the rest changes: `TECH: 2026 deep learning` becomes `TECH: 2026DeepLearning` in camelCase. Leave it empty to convert whole tags.
 
 If two tags end up with the same name, the preview marks them as a merge.
 
-### Merge
+### Rename & Merge
 
-Select two or more tags and type or pick the name they should all become. The name can be one of the selected tags, another existing tag, or a new name.
+Select one tag to rename it, or two or more to merge them, then type or pick the new name. The name can be one of the selected tags, another existing tag, or a new name. Renaming a tag to the name of an existing tag merges the two.
 
 ### Remove
 
@@ -55,7 +59,7 @@ Choose how strict the match is:
 - **Ignoring case**: `Machine Learning` and `machine learning`.
 - **Ignoring case, spaces, "-" and "\_"**: also treats `machine-learning`, `machine_learning` and `machineLearning` as the same.
 
-Each group suggests a spelling to keep; pick another one with the radio buttons, or untick the group to skip it. Below the groups, **Possible typos and plurals** lists near-matches, which are never merged automatically. **Merge…** sends a pair to the Merge tab so you can decide.
+Each group suggests a spelling to keep; pick another one with the radio buttons, or untick the group to skip it. Below the groups, **Possible typos and plurals** lists near-matches, which are never merged automatically. **Merge…** sends a pair to the Rename & Merge tab so you can decide.
 
 ### Undo
 

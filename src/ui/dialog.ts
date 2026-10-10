@@ -112,8 +112,11 @@ function compareRows(key: SortKey): (a: NameRow, b: NameRow) => number {
   }
 }
 
-/** Narrowest a tag list column can be dragged, in px. */
+/** Narrowest a table column can be dragged, in px. */
 const MIN_COLUMN_WIDTH = 32;
+
+/** Tables whose columns the user can resize. */
+type ResizableTable = "tags" | "preview";
 
 const MAX_FUZZY = 100;
 /** Rows rendered at most in the tag list and the preview (all still apply). */
@@ -160,8 +163,8 @@ export class TagWizDialog {
   private includeSub = true;
   private filter = "";
   private sort: Sort = DEFAULT_SORT;
-  /** Tag list column widths in px, in column order, once the user resized one. */
-  private columnWidths?: number[];
+  /** Column widths in px, in column order, of each table the user resized. */
+  private columnWidths: Partial<Record<ResizableTable, number[]>> = {};
   private allTags: TagRef[] = [];
   private rows: NameRow[] = [];
   private selected = new Set<string>();
@@ -170,7 +173,7 @@ export class TagWizDialog {
   private caseOpts: CaseOptions = {
     style: "title",
     keepAcronyms: true,
-    preservePrefix: false,
+    prefix: "",
     smallWords: DEFAULT_SMALL_WORDS,
   };
   private unifyTarget = "";
@@ -456,6 +459,7 @@ export class TagWizDialog {
             args: { collection: this.collection.name },
           }),
         ),
+        h(doc, "div", { class: "tw-separator" }),
         h(
           doc,
           "label",
@@ -645,16 +649,8 @@ export class TagWizDialog {
           h(doc, "span", { class: "tw-sort-label" }, label),
           icon,
         ),
-        h(doc, "span", {
-          class: "tw-col-resizer",
-          "aria-hidden": "true",
-          onpointerdown: (e: PointerEvent) => this.startResize(e, th),
-          ondblclick: () => {
-            this.columnWidths = undefined;
-            this.applyColumnWidths(th.closest("table") as HTMLTableElement);
-          },
-        }),
       );
+      th.appendChild(this.columnResizer("tags", th));
       const update = () => {
         const dir = this.sort.key === key ? this.sort.dir : undefined;
         th.setAttribute(
@@ -697,17 +693,33 @@ export class TagWizDialog {
       h(doc, "div", { class: "tw-scroll-box" }, table, more),
     ]);
     // Only once in the document: it reads the headers' computed padding.
-    this.applyColumnWidths(table);
+    this.applyColumnWidths("tags", table);
   }
 
   /**
-   * Size the tag list's columns: the CSS defaults, or the widths the user
+   * The grip at a header's right edge: drag it to resize the column,
+   * double-click it to restore the table's default widths.
+   */
+  private columnResizer(key: ResizableTable, th: HTMLElement) {
+    return h(this.doc, "span", {
+      class: "tw-col-resizer",
+      "aria-hidden": "true",
+      onpointerdown: (e: PointerEvent) => this.startResize(e, key, th),
+      ondblclick: () => {
+        delete this.columnWidths[key];
+        this.applyColumnWidths(key, th.closest("table") as HTMLTableElement);
+      },
+    });
+  }
+
+  /**
+   * Size a table's columns: the CSS defaults, or the widths the user
    * dragged. Dragged widths are exact, like in a spreadsheet: the table is as
    * wide as its columns, so it may leave room on the right or scroll sideways.
    */
-  private applyColumnWidths(table: HTMLTableElement) {
+  private applyColumnWidths(key: ResizableTable, table: HTMLTableElement) {
     const cells = [...table.querySelectorAll<HTMLElement>("thead th")];
-    const widths = this.columnWidths;
+    const widths = this.columnWidths[key];
     table.classList.toggle("tw-sized", !!widths);
     table.style.width = widths
       ? `${widths.reduce((sum, w) => sum + w, 0)}px`
@@ -726,7 +738,7 @@ export class TagWizDialog {
   }
 
   /** Drag a header's right edge to resize its column; the others stay put. */
-  private startResize(e: PointerEvent, th: HTMLElement) {
+  private startResize(e: PointerEvent, key: ResizableTable, th: HTMLElement) {
     if (e.button !== 0) return;
     e.preventDefault(); // no text selection while dragging
     e.stopPropagation();
@@ -735,8 +747,8 @@ export class TagWizDialog {
     const index = cells.indexOf(th);
     // Pin every column at its current width, so only this one moves.
     const widths = cells.map((cell) => cell.getBoundingClientRect().width);
-    this.columnWidths = widths;
-    this.applyColumnWidths(table);
+    this.columnWidths[key] = widths;
+    this.applyColumnWidths(key, table);
 
     const startX = e.clientX;
     const startWidth = widths[index];
@@ -749,7 +761,7 @@ export class TagWizDialog {
         MIN_COLUMN_WIDTH,
         startWidth + ev.clientX - startX,
       );
-      this.applyColumnWidths(table);
+      this.applyColumnWidths(key, table);
     };
     const end = () => {
       grip.classList.remove("tw-active");
@@ -871,11 +883,7 @@ export class TagWizDialog {
           ),
         );
       }
-      const check = (
-        id: string,
-        label: FluentMessageId,
-        key: "keepAcronyms" | "preservePrefix",
-      ) =>
+      const check = (id: string, label: FluentMessageId, key: "keepAcronyms") =>
         h(
           doc,
           "label",
@@ -907,8 +915,28 @@ export class TagWizDialog {
           h(doc, "label", { for: "tw-style" }, getString("case-style")),
           style,
         ),
+        h(doc, "div", { class: "tw-separator" }),
         check("tw-acr", "case-keep-acronyms", "keepAcronyms"),
-        check("tw-pre", "case-preserve-prefix", "preservePrefix"),
+        h(doc, "div", { class: "tw-separator" }),
+        h(
+          doc,
+          "div",
+          { class: "tw-field", title: getString("case-prefix-hint") },
+          h(doc, "label", { for: "tw-prefix" }, getString("case-prefix")),
+          h(doc, "input", {
+            type: "text",
+            id: "tw-prefix",
+            placeholder: getString("case-prefix-placeholder"),
+            value: this.caseOpts.prefix ?? "",
+            oninput: (e: Event) => {
+              this.caseOpts = {
+                ...this.caseOpts,
+                prefix: (e.target as HTMLInputElement).value,
+              };
+              this.refreshPlan();
+            },
+          }),
+        ),
       ]);
     } else if (this.tab === "unify") {
       const names = this.rows.filter((r) => this.selected.has(r.name));
@@ -924,6 +952,7 @@ export class TagWizDialog {
           h(doc, "input", {
             type: "text",
             id: "tw-target",
+            placeholder: getString("unify-target-placeholder"),
             list: "tw-targets",
             value: this.unifyTarget,
             oninput: (e: Event) => {
@@ -1183,10 +1212,15 @@ export class TagWizDialog {
         ),
       );
     }
+    const header = (label: string, cls = "") => {
+      const th = h(doc, "th", { class: cls }, label);
+      th.appendChild(this.columnResizer("preview", th));
+      return th;
+    };
     const table = h(
       doc,
       "table",
-      { class: "tw-table" },
+      { class: "tw-table tw-preview-table" },
       h(
         doc,
         "thead",
@@ -1196,9 +1230,9 @@ export class TagWizDialog {
           "tr",
           {},
           h(doc, "th", { class: "tw-checkbox" }),
-          h(doc, "th", {}, getString("preview-col-change")),
-          h(doc, "th", { class: "tw-count" }, getString("preview-col-items")),
-          h(doc, "th", {}, getString("preview-col-notes")),
+          header(getString("preview-col-change")),
+          header(getString("preview-col-items"), "tw-count"),
+          header(getString("preview-col-notes")),
         ),
       ),
       tbody,
@@ -1222,6 +1256,8 @@ export class TagWizDialog {
           : null,
       ),
     ]);
+    // Rebuilt on every plan change: keep the widths the user dragged.
+    this.applyColumnWidths("preview", table);
   }
 
   private describeOp(op: Op): Node[] {
@@ -1235,8 +1271,13 @@ export class TagWizDialog {
         ];
       case "remove":
         return [
-          doc.createTextNode(`${getString("op-remove")}: `),
-          h(doc, "strong", {}, op.tag.name),
+          h(
+            doc,
+            "span",
+            { class: "tw-warning-text" },
+            `${getString("op-remove")}: `,
+            h(doc, "strong", {}, op.tag.name),
+          ),
         ];
       case "retype":
         return [

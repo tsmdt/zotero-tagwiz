@@ -46,7 +46,11 @@ describe("plan", function () {
 
     it("flags two sources collapsing to one name", function () {
       const all = [t("Foo"), t("FOO")];
-      const plan = buildCasePlan(all, { style: "lower" }, all);
+      const plan = buildCasePlan(
+        all,
+        { style: "lower", keepAcronyms: false },
+        all,
+      );
       assert.isTrue(plan.rows.every((r) => r.merges));
     });
 

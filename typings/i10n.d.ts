@@ -10,7 +10,9 @@ export type FluentMessageId =
   | 'case-keep-acronyms'
   | 'case-lower'
   | 'case-pascal'
-  | 'case-preserve-prefix'
+  | 'case-prefix'
+  | 'case-prefix-hint'
+  | 'case-prefix-placeholder'
   | 'case-sentence'
   | 'case-snake'
   | 'case-style'
@@ -93,4 +95,5 @@ export type FluentMessageId =
   | 'undo-none'
   | 'undo-unavailable'
   | 'unify-hint'
-  | 'unify-target';
+  | 'unify-target'
+  | 'unify-target-placeholder';

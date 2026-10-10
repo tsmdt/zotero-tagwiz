@@ -46,35 +46,75 @@ describe("convertCase", function () {
     );
     assert.equal(c("machineLearning", "snake"), "machine_learning");
     assert.equal(c("Machine Learning", "kebab"), "machine-learning");
-    assert.equal(c("HTTPServer error", "snake"), "http_server_error");
+    assert.equal(
+      c("HTTPServer error", "snake", { keepAcronyms: false }),
+      "http_server_error",
+    );
+  });
+
+  it("keeps acronyms in every style by default, optionally not", function () {
+    const name = "LLM Framework Studies";
+    assert.equal(c("AA Digital Humanities", "lower"), "AA digital humanities");
+    assert.equal(c(name, "camel"), "LLMframeworkStudies");
+    assert.equal(c(name, "pascal"), "LLMFrameworkStudies");
+    assert.equal(c(name, "snake"), "LLM_framework_studies");
+    assert.equal(c(name, "kebab"), "LLM-framework-studies");
+    assert.equal(c("deep NLP models", "camel"), "deepNLPModels");
+    assert.equal(c("HTTPServer error", "snake"), "HTTP_server_error");
+    const off = { keepAcronyms: false };
+    assert.equal(
+      c("AA Digital Humanities", "lower", off),
+      "aa digital humanities",
+    );
+    assert.equal(c(name, "camel", off), "llmFrameworkStudies");
+    assert.equal(c(name, "pascal", off), "LlmFrameworkStudies");
+    assert.equal(c(name, "snake", off), "llm_framework_studies");
   });
 
   it("handles non-Latin scripts and diacritics", function () {
     assert.equal(c("機械学習", "title"), "機械学習");
     assert.equal(c("école normale", "title"), "École Normale");
-    assert.equal(c("ÉCOLE", "lower"), "école");
+    assert.equal(c("ÉCOLE", "lower", { keepAcronyms: false }), "école");
   });
 
   it("is locale independent (Turkish dotted I)", function () {
     // JS toLowerCase is locale-independent: İ -> i + combining dot, never ı.
-    assert.equal(c("TITLE", "lower"), "title");
-    assert.notInclude(c("TITLE", "lower"), "ı");
+    assert.equal(c("TITLE", "lower", { keepAcronyms: false }), "title");
+    assert.notInclude(c("TITLE", "lower", { keepAcronyms: false }), "ı");
   });
 
-  it("preservePrefix leaves everything up to the last : or / alone", function () {
+  it("keeps a user-given prefix unchanged", function () {
     assert.equal(
-      c("topic:machine learning", "title", { preservePrefix: true }),
-      "topic:Machine Learning",
+      c("00_Digital Humanities", "camel", { prefix: "00_" }),
+      "00_digitalHumanities",
     );
     assert.equal(
-      c("Area/Sub Topic", "lower", { preservePrefix: true }),
-      "Area/sub topic",
+      c("Aa-Computational-Studies", "kebab", { prefix: "Aa-" }),
+      "Aa-computational-studies",
     );
     assert.equal(
-      c("topic: foo bar", "title", { preservePrefix: true }),
-      "topic: Foo Bar",
+      c("TECH: 2026 deep learning", "camel", { prefix: "TECH: " }),
+      "TECH: 2026DeepLearning",
     );
+    assert.equal(
+      c("topic:machine learning", "upper", { prefix: "topic:" }),
+      "topic:MACHINE LEARNING",
+    );
+  });
+
+  it("converts the whole tag when the prefix does not match exactly", function () {
+    assert.equal(
+      c("tech: deep learning", "camel", { prefix: "TECH: " }),
+      "techDeepLearning",
+    );
+    assert.equal(c("Deep Learning", "lower", { prefix: "" }), "deep learning");
     assert.equal(c("topic:machine", "upper"), "TOPIC:MACHINE");
+  });
+
+  it("is idempotent with a prefix", function () {
+    const opts = { prefix: "TECH: " };
+    const once = c("TECH: 2026 deep learning", "camel", opts);
+    assert.equal(c(once, "camel", opts), once);
   });
 
   it("is idempotent for every style", function () {
@@ -92,6 +132,8 @@ describe("convertCase", function () {
       for (const name of [
         "Machine learning",
         "NLP and the web",
+        "LLM Framework Studies",
+        "deep NLP models",
         "a_b-c d",
         "x",
       ]) {

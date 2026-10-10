@@ -7,12 +7,12 @@ dialog-no-library = Select a library or collection first.
 scope-collection = Tags used in “{ $collection }”
 scope-library = Showing all tags in “{ $library }”
 include-subcollections = Include subcollections
-edits-library-wide = Changes always apply to the whole library.
+edits-library-wide = Changes always apply to your whole library.
 
 tab-case = Change Case
-tab-unify = Merge
+tab-unify = Rename & Merge
 tab-remove = Remove
-tab-duplicates = Duplicates
+tab-duplicates = Clean Duplicates
 
 filter-placeholder = Filter tags… 
 select-shown = Select All
@@ -34,11 +34,14 @@ case-camel = camelCase
 case-pascal = PascalCase
 case-snake = snake_case
 case-kebab = kebab-case
-case-keep-acronyms = Keep ALL-CAPS words (Title/Sentence case)
-case-preserve-prefix = Keep the part before “:” or “/”
+case-keep-acronyms = Keep ALL-CAPS words
+case-prefix = Keep prefix
+case-prefix-placeholder = e.g. TECH:
+case-prefix-hint = Tags starting with this text keep it exactly as typed (case-sensitive, spaces count).
 
-unify-target = Merge into
-unify-hint = Select the tags to merge, then choose or type the name they should all become.
+unify-target = New name
+unify-target-placeholder = Type a new tag label...
+unify-hint = Select one tag to rename it, or several to merge them into one. Then choose or type the new name.
 remove-hint = Select the tags to delete from every item in the library.
 
 dup-level = Treat as duplicates

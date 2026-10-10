@@ -299,6 +299,8 @@ describe("dialog (in Zotero)", function () {
     pointer(doc, "pointerup", x + 40);
     assert.approximately(width("type"), type + 40, 1);
     assert.approximately(width("items"), items, 1);
+    // Each table keeps its own widths: the preview's are untouched.
+    assert.isUndefined(dialog.columnWidths.preview);
 
     // The widths survive a re-render, and a double-click restores the defaults.
     dialog.renderAll();
@@ -306,7 +308,7 @@ describe("dialog (in Zotero)", function () {
     th("type")
       .querySelector(".tw-col-resizer")!
       .dispatchEvent(new win.MouseEvent("dblclick", { bubbles: true }));
-    assert.isUndefined(dialog.columnWidths);
+    assert.isUndefined(dialog.columnWidths.tags);
     assert.approximately(width("type"), type, 1);
   });
 
