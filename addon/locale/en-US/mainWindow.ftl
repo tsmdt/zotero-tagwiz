@@ -1,4 +1,4 @@
 menu-collection =
-    .label = 🏷️ TagWiz
+    .label = TagWiz 🏷️
 menu-tools =
-    .label = 🏷️ TagWiz
+    .label = TagWiz 🏷️

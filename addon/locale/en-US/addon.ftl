@@ -1,7 +1,7 @@
-menuitem-collection-label = 🏷️ TagWiz
-menuitem-tools-label = 🏷️ TagWiz
+menuitem-collection-label = TagWiz 🏷️
+menuitem-tools-label = TagWiz 🏷️
 
-dialog-title = 🏷️ TagWiz
+dialog-title = TagWiz 🏷️
 dialog-no-library = Select a library or collection first.
 
 scope-collection = Tags used in “{ $collection }”
@@ -81,10 +81,10 @@ undo-last = Undo Latest Edit
 confirm-title = Apply changes?
 confirm-body = Apply { $changes } changes to { $items } items in the library ({ $outside } outside this collection or in the trash)?
 
-    A snapshot is saved first, so “Undo last run” can restore the previous state.
+    A snapshot is saved first, so "Undo Last Edit" can restore the previous state.
 sync-warning = A sync is running. Changing tags now may be overwritten or conflict.
 status-working = Applying change { $done } of { $total }…
-status-done = Done: { $done } of { $total } changes (already) applied.
+status-done = Done: { $done } of { $total } changes applied.
 status-cancelled = Cancelled after { $done } of { $total } changes. You can undo what was applied.
 status-failed = Stopped after { $done } of { $total } changes: { $error }. You can undo what was applied.
 status-error = Could not apply: { $error }
