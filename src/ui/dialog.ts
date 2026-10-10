@@ -222,9 +222,9 @@ export class TagWizDialog {
   private get scope(): Scope | undefined {
     return this.collection
       ? {
-        collectionID: this.collection.id,
-        includeSubcollections: this.includeSub,
-      }
+          collectionID: this.collection.id,
+          includeSubcollections: this.includeSub,
+        }
       : undefined;
   }
 
@@ -417,8 +417,8 @@ export class TagWizDialog {
       if (seq !== this.impactSeq) return; // a newer plan superseded this one
       this.impactText = this.scope
         ? getString("impact", {
-          args: { total: impact.total, outside: impact.outsideScope },
-        })
+            args: { total: impact.total, outside: impact.outsideScope },
+          })
         : getString("impact-library", { args: { total: impact.total } });
     }
     if (seq === this.impactSeq && this.alive) this.renderFooter();
@@ -951,11 +951,11 @@ export class TagWizDialog {
             h(doc, "span", { class: "tw-tag-name" }, member.name),
             member.type === 1
               ? h(
-                doc,
-                "span",
-                { class: "tw-auto-badge" },
-                getString("flag-auto"),
-              )
+                  doc,
+                  "span",
+                  { class: "tw-auto-badge" },
+                  getString("flag-auto"),
+                )
               : null,
             h(doc, "span", { class: "tw-hint" }, ` ${member.itemCount}`),
             index === 0 ? null : null,
@@ -1132,13 +1132,13 @@ export class TagWizDialog {
         table,
         rows.length > MAX_ROWS
           ? h(
-            doc,
-            "div",
-            { class: "tw-hint tw-list-notice" },
-            getString("preview-more", {
-              args: { shown: MAX_ROWS, total: rows.length },
-            }),
-          )
+              doc,
+              "div",
+              { class: "tw-hint tw-list-notice" },
+              getString("preview-more", {
+                args: { shown: MAX_ROWS, total: rows.length },
+              }),
+            )
           : null,
       ),
     ]);
@@ -1244,27 +1244,27 @@ export class TagWizDialog {
     );
     const apply = this.busy
       ? h(
-        doc,
-        "button",
-        {
-          type: "button",
-          onclick: () => {
-            this.cancelRequested = true;
+          doc,
+          "button",
+          {
+            type: "button",
+            onclick: () => {
+              this.cancelRequested = true;
+            },
           },
-        },
-        getString("cancel"),
-      )
+          getString("cancel"),
+        )
       : h(
-        doc,
-        "button",
-        {
-          type: "button",
-          class: "tw-primary-button",
-          disabled: !ops.length,
-          onclick: () => void this.apply(),
-        },
-        getString("apply"),
-      );
+          doc,
+          "button",
+          {
+            type: "button",
+            class: "tw-primary-button",
+            disabled: !ops.length,
+            onclick: () => void this.apply(),
+          },
+          getString("apply"),
+        );
     const close = h(
       doc,
       "button",
@@ -1401,8 +1401,8 @@ export class TagWizDialog {
         const question =
           result.reason === "drifted"
             ? getString("undo-drifted", {
-              args: { tags: result.driftedTags.slice(0, 10).join(", ") },
-            })
+                args: { tags: result.driftedTags.slice(0, 10).join(", ") },
+              })
             : getString("undo-interrupted");
         if (!this.confirm(getString("undo-last"), question)) return;
         result = await undoJournal(journal.id, { force: true });
