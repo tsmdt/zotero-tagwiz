@@ -44,8 +44,22 @@ interface NameRow {
   refs: TagRef[];
   items: number;
   scopeItems?: number;
-  auto: boolean;
+  type: TagKind;
   color?: string;
+}
+
+/** A name can exist as a manual tag, an automatic one, or both. */
+type TagKind = "manual" | "automatic" | "both";
+const TAG_KINDS: Record<TagKind, { rank: number; label: FluentMessageId }> = {
+  manual: { rank: 0, label: "type-manual" },
+  both: { rank: 1, label: "type-both" },
+  automatic: { rank: 2, label: "type-automatic" },
+};
+
+function tagKind(refs: TagRef[]): TagKind {
+  const manual = refs.some((r) => r.type !== 1);
+  const auto = refs.some((r) => r.type === 1);
+  return manual && auto ? "both" : auto ? "automatic" : "manual";
 }
 
 /** Preview rows that belong together (same name, e.g. manual + automatic). */
@@ -56,6 +70,45 @@ interface DisplayRow {
   items: number;
   included: boolean;
   blocked: boolean;
+}
+
+/** Sortable columns of the tag list. */
+type SortKey = "name" | "type" | "items" | "scopeItems";
+interface Sort {
+  key: SortKey;
+  dir: "asc" | "desc";
+}
+/** `rows` are kept in this order, so it needs no sorting. */
+const DEFAULT_SORT: Sort = { key: "name", dir: "asc" };
+/** Direction of a column's first click: counts start with the most used. */
+const FIRST_DIR: Record<SortKey, Sort["dir"]> = {
+  name: "asc",
+  type: "asc",
+  items: "desc",
+  scopeItems: "desc",
+};
+
+/**
+ * Header clicks toggle the name column; the other columns cycle through their
+ * first direction, the other one, then back to name order.
+ */
+function nextSort(current: Sort, key: SortKey): Sort {
+  const first = FIRST_DIR[key];
+  const flip = (dir: Sort["dir"]) => (dir === "asc" ? "desc" : "asc");
+  if (current.key !== key) return { key, dir: first };
+  if (key === "name") return { key, dir: flip(current.dir) };
+  return current.dir === first ? { key, dir: flip(first) } : DEFAULT_SORT;
+}
+
+function compareRows(key: SortKey): (a: NameRow, b: NameRow) => number {
+  switch (key) {
+    case "name":
+      return (a, b) => byName(a.name, b.name);
+    case "type":
+      return (a, b) => TAG_KINDS[a.type].rank - TAG_KINDS[b.type].rank;
+    default:
+      return (a, b) => (a[key] ?? 0) - (b[key] ?? 0);
+  }
 }
 
 const MAX_FUZZY = 100;
@@ -102,6 +155,7 @@ export class TagWizDialog {
   private tab: TabID = "case";
   private includeSub = true;
   private filter = "";
+  private sort: Sort = DEFAULT_SORT;
   private allTags: TagRef[] = [];
   private rows: NameRow[] = [];
   private selected = new Set<string>();
@@ -237,7 +291,7 @@ export class TagWizDialog {
         refs,
         items: refs.reduce((n, r) => n + r.itemCount, 0),
         scopeItems: this.scope ? scopeByName.get(name) : undefined,
-        auto: refs.some((r) => r.type === 1),
+        type: tagKind(refs),
         color: refs.find((r) => r.color)?.color,
       };
     });
@@ -376,16 +430,11 @@ export class TagWizDialog {
     const { doc } = this;
     clear(this.root);
 
-    const header = h(
-      doc,
-      "div",
-      { class: "tc-header" },
-      h(doc, "h1", {}, getString("dialog-title")),
-    );
+    const header = h(doc, "div", { class: "tw-header" });
     if (this.collection) {
       const sub = h(doc, "input", {
         type: "checkbox",
-        id: "tc-sub",
+        id: "tw-sub",
         checked: this.includeSub,
         onchange: async (e: Event) => {
           this.includeSub = (e.target as HTMLInputElement).checked;
@@ -404,7 +453,7 @@ export class TagWizDialog {
         h(
           doc,
           "label",
-          { class: "tc-field", for: "tc-sub" },
+          { class: "tw-field", for: "tw-sub" },
           sub,
           getString("include-subcollections"),
         ),
@@ -421,18 +470,15 @@ export class TagWizDialog {
         ),
       ]);
     }
-    append(header, [
-      h(doc, "span", { class: "tc-note" }, getString("edits-library-wide")),
-    ]);
 
-    const tabs = h(doc, "div", { class: "tc-tabs", role: "tablist" });
+    const tabs = h(doc, "div", { class: "tw-tabs", role: "tablist" });
     for (const id of TABS) {
       tabs.appendChild(
         h(
           doc,
           "button",
           {
-            class: "tc-tab",
+            class: "tw-tab",
             role: "tab",
             type: "button",
             "aria-selected": String(id === this.tab),
@@ -444,23 +490,21 @@ export class TagWizDialog {
       );
     }
 
-    this.leftEl = h(doc, "div", { class: "tc-pane" });
-    this.controlsEl = h(doc, "div", { class: "tc-pane" });
-    this.previewEl = h(doc, "div", {
-      class: "tc-pane",
-      style: "flex:1;min-height:0",
-    });
-    const right = h(
+    this.controlsEl = h(doc, "div", { class: "tw-options" });
+    const menu = h(doc, "div", { class: "tw-menu" }, tabs, this.controlsEl);
+
+    this.leftEl = h(doc, "div", { class: "tw-pane" });
+    this.previewEl = h(doc, "div", { class: "tw-pane" });
+    const body = h(
       doc,
       "div",
-      { class: "tc-pane" },
-      this.controlsEl,
+      { class: "tw-main" },
+      this.leftEl,
       this.previewEl,
     );
-    const body = h(doc, "div", { class: "tc-body" }, this.leftEl, right);
-    this.footerEl = h(doc, "div", { class: "tc-footer" });
+    this.footerEl = h(doc, "div", { class: "tw-footer" });
 
-    append(this.root, [header, tabs, body, this.footerEl]);
+    append(this.root, [header, menu, body, this.footerEl]);
   }
 
   private renderAll() {
@@ -471,7 +515,7 @@ export class TagWizDialog {
   }
 
   private renderTabs() {
-    for (const el of this.root.querySelectorAll<HTMLElement>(".tc-tab")) {
+    for (const el of this.root.querySelectorAll<HTMLElement>(".tw-tab")) {
       el.setAttribute("aria-selected", String(el.dataset.tab === this.tab));
     }
   }
@@ -490,27 +534,65 @@ export class TagWizDialog {
 
   private visibleRows(): NameRow[] {
     const needle = this.filter.trim().toLowerCase();
-    return needle
+    const rows = needle
       ? this.rows.filter((r) => r.name.toLowerCase().includes(needle))
       : this.rows;
+    const { key, dir } = this.sort;
+    if (key === DEFAULT_SORT.key && dir === DEFAULT_SORT.dir) return rows;
+    const sign = dir === "asc" ? 1 : -1;
+    const compare = compareRows(key);
+    // Stable sort: equal values keep their name order.
+    return [...rows].sort((a, b) => sign * compare(a, b));
   }
 
   private renderTagList() {
     const { doc } = this;
-    const countEl = h(doc, "span", { class: "tc-note" });
+    const countEl = h(doc, "span", { class: "tw-hint" });
+    const tbody = h(doc, "tbody");
+    const more = h(doc, "div", {
+      class: "tw-hint tw-list-notice",
+      hidden: true,
+    });
+    const selectAll = h(
+      doc,
+      "button",
+      {
+        type: "button",
+        class: "tw-select-all",
+        onclick: () => {
+          for (const r of this.visibleRows()) this.selected.add(r.name);
+          this.fillRows(tbody, updateCount, more);
+          this.selectionChanged();
+        },
+      },
+      getString("select-shown"),
+    );
+    const selectNone = h(
+      doc,
+      "button",
+      {
+        type: "button",
+        class: "tw-select-none",
+        onclick: () => {
+          this.selected.clear();
+          this.fillRows(tbody, updateCount, more);
+          this.selectionChanged();
+        },
+      },
+      getString("select-none"),
+    );
     const updateCount = () => {
       countEl.textContent = getString("selected-count", {
         args: { count: this.selected.size },
       });
+      selectNone.disabled = this.selected.size === 0;
     };
     updateCount();
 
-    const tbody = h(doc, "tbody");
-    const more = h(doc, "div", { class: "tc-note tc-empty", hidden: true });
     const toolbar = h(
       doc,
       "div",
-      { class: "tc-toolbar" },
+      { class: "tw-pane-header" },
       h(doc, "input", {
         type: "search",
         placeholder: getString("filter-placeholder"),
@@ -524,39 +606,57 @@ export class TagWizDialog {
           );
         },
       }),
-      h(
-        doc,
-        "button",
-        {
-          type: "button",
-          onclick: () => {
-            for (const r of this.visibleRows()) this.selected.add(r.name);
-            this.fillRows(tbody, updateCount, more);
-            this.selectionChanged();
-          },
-        },
-        getString("select-shown"),
-      ),
-      h(
-        doc,
-        "button",
-        {
-          type: "button",
-          onclick: () => {
-            this.selected.clear();
-            this.fillRows(tbody, updateCount, more);
-            this.selectionChanged();
-          },
-        },
-        getString("select-none"),
-      ),
+      selectAll,
+      selectNone,
       countEl,
     );
+
+    const headerUpdates: Array<() => void> = [];
+    const sortHeader = (key: SortKey, label: string, cls = "") => {
+      const icon = h(doc, "span", {
+        class: "tw-sort-icon",
+        "aria-hidden": "true",
+      });
+      const th = h(
+        doc,
+        "th",
+        { class: cls },
+        h(
+          doc,
+          "button",
+          {
+            type: "button",
+            class: "tw-sort-button",
+            "data-sort": key,
+            // Library and collection names can be long and get truncated.
+            title: label,
+            onclick: () => {
+              this.sort = nextSort(this.sort, key);
+              for (const update of headerUpdates) update();
+              this.fillRows(tbody, updateCount, more);
+            },
+          },
+          h(doc, "span", { class: "tw-sort-label" }, label),
+          icon,
+        ),
+      );
+      const update = () => {
+        const dir = this.sort.key === key ? this.sort.dir : undefined;
+        th.setAttribute(
+          "aria-sort",
+          dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none",
+        );
+        icon.textContent = dir === "asc" ? "↑" : dir === "desc" ? "↓" : "";
+      };
+      headerUpdates.push(update);
+      update();
+      return th;
+    };
 
     const table = h(
       doc,
       "table",
-      { class: "tc-table" },
+      { class: "tw-table tw-tag-table" },
       h(
         doc,
         "thead",
@@ -565,12 +665,13 @@ export class TagWizDialog {
           doc,
           "tr",
           {},
-          h(doc, "th", { class: "tc-check" }),
-          h(doc, "th", {}, getString("col-tag")),
-          this.scope
-            ? h(doc, "th", { class: "tc-num" }, getString("col-in-collection"))
+          h(doc, "th", { class: "tw-checkbox" }),
+          sortHeader("name", getString("col-tag")),
+          sortHeader("type", getString("col-type"), "tw-tag-type"),
+          this.collection
+            ? sortHeader("scopeItems", this.collection.name, "tw-count")
             : null,
-          h(doc, "th", { class: "tc-num" }, getString("col-items")),
+          sortHeader("items", this.libraryName(), "tw-count"),
         ),
       ),
       tbody,
@@ -578,7 +679,7 @@ export class TagWizDialog {
     this.fillRows(tbody, updateCount, more);
     append(this.leftEl, [
       toolbar,
-      h(doc, "div", { class: "tc-scroll" }, table, more),
+      h(doc, "div", { class: "tw-scroll-box" }, table, more),
     ]);
   }
 
@@ -604,7 +705,7 @@ export class TagWizDialog {
           h(
             doc,
             "td",
-            { colspan: 4, class: "tc-empty" },
+            { colspan: this.scope ? 5 : 4, class: "tw-list-notice" },
             getString("tag-list-empty"),
           ),
         ),
@@ -625,24 +726,27 @@ export class TagWizDialog {
       const name = h(
         doc,
         "td",
-        { class: "tc-name" },
+        { class: "tw-tag-name" },
         row.color ? swatch(doc, row.color) : null,
         row.name,
-        row.auto
-          ? h(doc, "span", { class: "tc-badge" }, getString("flag-auto"))
-          : null,
       );
       tbody.appendChild(
         h(
           doc,
           "tr",
           {},
-          h(doc, "td", { class: "tc-check" }, box),
+          h(doc, "td", { class: "tw-checkbox" }, box),
           name,
+          h(
+            doc,
+            "td",
+            { class: "tw-tag-type" },
+            getString(TAG_KINDS[row.type].label),
+          ),
           this.scope
-            ? h(doc, "td", { class: "tc-num" }, row.scopeItems ?? 0)
+            ? h(doc, "td", { class: "tw-count" }, row.scopeItems ?? 0)
             : null,
-          h(doc, "td", { class: "tc-num" }, row.items),
+          h(doc, "td", { class: "tw-count" }, row.items),
         ),
       );
     }
@@ -668,7 +772,7 @@ export class TagWizDialog {
     clear(this.controlsEl);
     if (this.tab === "case") {
       const style = h(doc, "select", {
-        id: "tc-style",
+        id: "tw-style",
         onchange: (e: Event) => {
           this.caseOpts = {
             ...this.caseOpts,
@@ -695,7 +799,7 @@ export class TagWizDialog {
         h(
           doc,
           "label",
-          { class: "tc-field", for: id },
+          { class: "tw-field", for: id },
           h(doc, "input", {
             type: "checkbox",
             id,
@@ -708,35 +812,39 @@ export class TagWizDialog {
               this.refreshPlan();
             },
           }),
-          getString(label),
+          h(
+            doc,
+            "span",
+            { class: "tw-field-text", title: getString(label) },
+            getString(label),
+          ),
         );
       append(this.controlsEl, [
         h(
           doc,
           "div",
-          { class: "tc-field" },
-          h(doc, "label", { for: "tc-style" }, getString("case-style")),
+          { class: "tw-field" },
+          h(doc, "label", { for: "tw-style" }, getString("case-style")),
           style,
         ),
-        check("tc-acr", "case-keep-acronyms", "keepAcronyms"),
-        check("tc-pre", "case-preserve-prefix", "preservePrefix"),
+        check("tw-acr", "case-keep-acronyms", "keepAcronyms"),
+        check("tw-pre", "case-preserve-prefix", "preservePrefix"),
       ]);
     } else if (this.tab === "unify") {
       const names = this.rows.filter((r) => this.selected.has(r.name));
-      const list = h(doc, "datalist", { id: "tc-targets" });
+      const list = h(doc, "datalist", { id: "tw-targets" });
       for (const r of names)
         list.appendChild(h(doc, "option", { value: r.name }));
       append(this.controlsEl, [
-        h(doc, "div", { class: "tc-note" }, getString("unify-hint")),
         h(
           doc,
           "div",
-          { class: "tc-field" },
-          h(doc, "label", { for: "tc-target" }, getString("unify-target")),
+          { class: "tw-field" },
+          h(doc, "label", { for: "tw-target" }, getString("unify-target")),
           h(doc, "input", {
             type: "text",
-            id: "tc-target",
-            list: "tc-targets",
+            id: "tw-target",
+            list: "tw-targets",
             value: this.unifyTarget,
             oninput: (e: Event) => {
               this.unifyTarget = (e.target as HTMLInputElement).value;
@@ -746,40 +854,61 @@ export class TagWizDialog {
           }),
           list,
         ),
+        h(
+          doc,
+          "div",
+          { class: "tw-hint", title: getString("unify-hint") },
+          getString("unify-hint"),
+        ),
       ]);
     } else if (this.tab === "remove") {
       append(this.controlsEl, [
-        h(doc, "div", { class: "tc-note" }, getString("remove-hint")),
+        h(
+          doc,
+          "div",
+          { class: "tw-hint", title: getString("remove-hint") },
+          getString("remove-hint"),
+        ),
+      ]);
+    } else if (this.tab === "duplicates") {
+      const tier = h(doc, "select", {
+        id: "tw-tier",
+        onchange: (e: Event) => {
+          this.dupTier = (e.target as HTMLSelectElement).value as DuplicateTier;
+          this.recomputeGroups();
+          this.renderLeft();
+          this.refreshPlan();
+        },
+      });
+      for (const [value, label] of DUP_TIERS) {
+        tier.appendChild(
+          h(
+            doc,
+            "option",
+            { value, selected: value === this.dupTier },
+            getString(label),
+          ),
+        );
+      }
+      append(this.controlsEl, [
+        h(
+          doc,
+          "div",
+          { class: "tw-field" },
+          h(doc, "label", { for: "tw-tier" }, getString("dup-level")),
+          tier,
+        ),
       ]);
     }
   }
 
   private renderDuplicates() {
     const { doc } = this;
-    const tier = h(doc, "select", {
-      id: "tc-tier",
-      onchange: (e: Event) => {
-        this.dupTier = (e.target as HTMLSelectElement).value as DuplicateTier;
-        this.recomputeGroups();
-        this.renderLeft();
-        this.refreshPlan();
-      },
-    });
-    for (const [value, label] of DUP_TIERS) {
-      tier.appendChild(
-        h(
-          doc,
-          "option",
-          { value, selected: value === this.dupTier },
-          getString(label),
-        ),
-      );
-    }
-    const scroll = h(doc, "div", { class: "tc-scroll" });
+    const scroll = h(doc, "div", { class: "tw-scroll-box" });
 
     if (!this.groups.length) {
       scroll.appendChild(
-        h(doc, "div", { class: "tc-empty" }, getString("dup-none")),
+        h(doc, "div", { class: "tw-list-notice" }, getString("dup-none")),
       );
     }
     for (const group of this.groups) {
@@ -798,11 +927,11 @@ export class TagWizDialog {
       const box = h(
         doc,
         "div",
-        { class: "tc-group" },
+        { class: "tw-duplicate-group" },
         h(doc, "h3", {}, on, getString("dup-merge-group")),
       );
       group.members.forEach((member, index) => {
-        const radioName = `tc-keep-${key}`;
+        const radioName = `tw-keep-${key}`;
         box.appendChild(
           h(
             doc,
@@ -819,11 +948,16 @@ export class TagWizDialog {
                 this.refreshPlan();
               },
             }),
-            h(doc, "span", { class: "tc-name" }, member.name),
+            h(doc, "span", { class: "tw-tag-name" }, member.name),
             member.type === 1
-              ? h(doc, "span", { class: "tc-badge" }, getString("flag-auto"))
+              ? h(
+                  doc,
+                  "span",
+                  { class: "tw-auto-badge" },
+                  getString("flag-auto"),
+                )
               : null,
-            h(doc, "span", { class: "tc-note" }, ` ${member.itemCount}`),
+            h(doc, "span", { class: "tw-hint" }, ` ${member.itemCount}`),
             index === 0 ? null : null,
           ),
         );
@@ -839,23 +973,23 @@ export class TagWizDialog {
         h(
           doc,
           "div",
-          { class: "tc-section-title" },
+          { class: "tw-section-title" },
           getString("dup-fuzzy-title"),
         ),
       );
-      const table = h(doc, "table", { class: "tc-table" });
+      const table = h(doc, "table", { class: "tw-table" });
       for (const pair of pairs.slice(0, MAX_FUZZY)) {
         table.appendChild(
           h(
             doc,
             "tr",
             {},
-            h(doc, "td", { class: "tc-name" }, pair.a.name),
-            h(doc, "td", { class: "tc-name" }, pair.b.name),
+            h(doc, "td", { class: "tw-tag-name" }, pair.a.name),
+            h(doc, "td", { class: "tw-tag-name" }, pair.b.name),
             h(
               doc,
               "td",
-              { class: "tc-note" },
+              { class: "tw-hint" },
               getString(
                 pair.reason === "typo"
                   ? "dup-fuzzy-reason-typo"
@@ -885,7 +1019,7 @@ export class TagWizDialog {
           h(
             doc,
             "div",
-            { class: "tc-note tc-empty" },
+            { class: "tw-hint tw-list-notice" },
             getString("dup-fuzzy-more", {
               args: { shown: MAX_FUZZY, total: pairs.length },
             }),
@@ -898,9 +1032,13 @@ export class TagWizDialog {
       h(
         doc,
         "div",
-        { class: "tc-field" },
-        h(doc, "label", { for: "tc-tier" }, getString("dup-level")),
-        tier,
+        { class: "tw-pane-header" },
+        h(
+          doc,
+          "span",
+          { class: "tw-pane-title" },
+          getString("dup-groups-title"),
+        ),
       ),
       scroll,
     ]);
@@ -921,8 +1059,8 @@ export class TagWizDialog {
     const head = h(
       doc,
       "div",
-      { class: "tc-section-title", style: "margin:0" },
-      getString("preview-title"),
+      { class: "tw-pane-header" },
+      h(doc, "span", { class: "tw-alert" }, getString("edits-library-wide")),
     );
     if (!rows.length) {
       append(this.previewEl, [
@@ -930,8 +1068,13 @@ export class TagWizDialog {
         h(
           doc,
           "div",
-          { class: "tc-scroll" },
-          h(doc, "div", { class: "tc-empty" }, getString("preview-empty")),
+          { class: "tw-scroll-box tw-empty-box" },
+          h(
+            doc,
+            "div",
+            { class: "tw-list-notice" },
+            getString("preview-empty"),
+          ),
         ),
       ]);
       return;
@@ -952,10 +1095,10 @@ export class TagWizDialog {
         h(
           doc,
           "tr",
-          { class: row.blocked ? "tc-disabled" : "" },
-          h(doc, "td", { class: "tc-check" }, box),
-          h(doc, "td", { class: "tc-name" }, ...this.describeOp(row.op)),
-          h(doc, "td", { class: "tc-num" }, row.items),
+          { class: row.blocked ? "tw-blocked-row" : "" },
+          h(doc, "td", { class: "tw-checkbox" }, box),
+          h(doc, "td", { class: "tw-tag-name" }, ...this.describeOp(row.op)),
+          h(doc, "td", { class: "tw-count" }, row.items),
           h(doc, "td", {}, ...this.notesFor(row)),
         ),
       );
@@ -963,7 +1106,7 @@ export class TagWizDialog {
     const table = h(
       doc,
       "table",
-      { class: "tc-table" },
+      { class: "tw-table" },
       h(
         doc,
         "thead",
@@ -972,9 +1115,9 @@ export class TagWizDialog {
           doc,
           "tr",
           {},
-          h(doc, "th", { class: "tc-check" }),
+          h(doc, "th", { class: "tw-checkbox" }),
           h(doc, "th", {}, getString("preview-col-change")),
-          h(doc, "th", { class: "tc-num" }, getString("preview-col-items")),
+          h(doc, "th", { class: "tw-count" }, getString("preview-col-items")),
           h(doc, "th", {}, getString("preview-col-notes")),
         ),
       ),
@@ -985,13 +1128,13 @@ export class TagWizDialog {
       h(
         doc,
         "div",
-        { class: "tc-scroll" },
+        { class: "tw-scroll-box" },
         table,
         rows.length > MAX_ROWS
           ? h(
               doc,
               "div",
-              { class: "tc-note tc-empty" },
+              { class: "tw-hint tw-list-notice" },
               getString("preview-more", {
                 args: { shown: MAX_ROWS, total: rows.length },
               }),
@@ -1006,8 +1149,8 @@ export class TagWizDialog {
     switch (op.kind) {
       case "rename":
         return [
-          h(doc, "span", { class: "tc-from" }, op.from.name),
-          h(doc, "span", { class: "tc-arrow" }, "→"),
+          h(doc, "span", { class: "tw-old-name" }, op.from.name),
+          h(doc, "span", { class: "tw-rename-arrow" }, "→"),
           h(doc, "span", {}, op.to),
         ];
       case "remove":
@@ -1045,17 +1188,24 @@ export class TagWizDialog {
         h(
           doc,
           "div",
-          { class: "tc-bad" },
+          { class: "tw-error-text" },
           getString(errors[first.error] ?? "note-empty"),
         ),
       );
     }
     if (first.merges && !first.error) {
-      notes.push(h(doc, "div", { class: "tc-warn" }, getString("note-merge")));
+      notes.push(
+        h(doc, "div", { class: "tw-warning-text" }, getString("note-merge")),
+      );
     }
     if (row.rows.some((r) => r.warnings.includes("loses-color"))) {
       notes.push(
-        h(doc, "div", { class: "tc-warn" }, getString("note-loses-color")),
+        h(
+          doc,
+          "div",
+          { class: "tw-warning-text" },
+          getString("note-loses-color"),
+        ),
       );
     }
     return notes;
@@ -1068,13 +1218,13 @@ export class TagWizDialog {
     const info = h(
       doc,
       "div",
-      { class: "tc-grow" },
+      { class: "tw-footer-info" },
       this.impactText ? h(doc, "div", {}, this.impactText) : null,
       h(
         doc,
         "div",
         {
-          class: "tc-status",
+          class: "tw-status",
           role: "status",
           "aria-live": "polite",
           "data-kind": this.status.kind,
@@ -1109,7 +1259,7 @@ export class TagWizDialog {
           "button",
           {
             type: "button",
-            class: "tc-primary",
+            class: "tw-primary-button",
             disabled: !ops.length,
             onclick: () => void this.apply(),
           },
@@ -1285,7 +1435,7 @@ export class TagWizDialog {
  */
 function swatch(doc: Document, color: string): HTMLElement {
   const el = h(doc, "span", {
-    class: "tc-swatch",
+    class: "tw-color-dot",
     title: getString("flag-color"),
   });
   el.style.backgroundColor = color;
