@@ -5,9 +5,11 @@
  *
  *   ┌ #tagwiz-root ─────────────────────────────────────────────┐
  *   │ .tw-header   scope ("All tags in …") + subcollections box │
- *   │ .tw-tabs     Change Case | Unify | Remove | Duplicates    │
+ *   │ .tw-menu ┌ .tw-tabs     Change Case | Merge | Remove | … ┐ │
+ *   │          └ .tw-options  options of the active tab        ┘ │
  *   │ .tw-main ┌ left .tw-pane ──────┐ ┌ right .tw-pane ──────┐ │
- *   │          │ .tw-toolbar         │ │ tab controls         │ │
+ *   │          │ .tw-pane-header     │ │ .tw-pane-header      │ │
+ *   │          │ (filter, Select All)│ │ ("Preview")          │ │
  *   │          │ tag list table      │ │ preview table        │ │
  *   │          │ (or duplicate       │ │                      │ │
  *   │          │  groups)            │ │                      │ │
@@ -28,6 +30,8 @@
   --tw-border: color-mix(in srgb, CanvasText 20%, transparent);
   --tw-muted: color-mix(in srgb, CanvasText 60%, transparent);
   --tw-hover: color-mix(in srgb, CanvasText 7%, transparent);
+  --tw-band: color-mix(in srgb, CanvasText 5%, Canvas);
+  --tw-row: 26px;
   --tw-accent: AccentColor;
   --tw-warn: #b45309;
   --tw-error: #b91c1c;
@@ -68,13 +72,18 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
- * Tabs: Change Case, Unify, Remove, Duplicates
+ * Menu: two bands, the tabs (Change Case, Merge, Remove, Duplicates) above
+ * the options of the active tab
  * ------------------------------------------------------------------------- */
+
+.tw-menu {
+  display: flex;
+  flex-direction: column;
+}
 
 .tw-tabs {
   display: flex;
   gap: 2px;
-  border-bottom: 1px solid var(--tw-border);
 }
 
 .tw-tab {
@@ -93,52 +102,85 @@ body {
   background: var(--tw-hover);
 }
 
-/* The active tab merges into the content below it. */
+/* The active tab merges into the options band below it. */
 .tw-tab[aria-selected="true"] {
+  position: relative;
   border-color: var(--tw-border);
-  background: Canvas;
+  background: var(--tw-band);
   font-weight: 600;
   margin-bottom: -1px;
-  border-bottom: 1px solid Canvas;
+  border-bottom: 1px solid var(--tw-band);
+}
+
+/* Options of the active tab: style picker, merge target, duplicate level… */
+.tw-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  min-height: var(--tw-row);
+  padding: 6px 10px;
+  background: var(--tw-band);
+  border: 1px solid var(--tw-border);
+  border-radius: 0 6px 6px 6px;
+}
+
+.tw-options input[type="text"] {
+  width: 18em;
+}
+
+/* Long hints take the rest of the row and wrap there. */
+.tw-options .tw-hint {
+  flex: 1 1 16em;
 }
 
 /* ---------------------------------------------------------------------------
  * Main area: two panes side by side. Left: the tag list (or the duplicate
- * groups). Right: the tab's controls above the preview of the changes.
+ * groups). Right: the preview of the changes.
+ *
+ * Both panes share the grid's two rows (subgrid): a header row, then the
+ * scrolling box. So the headers and the boxes line up across the panes even
+ * when one header wraps onto a second line.
  * ------------------------------------------------------------------------- */
 
 .tw-main {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) minmax(300px, 1fr);
-  gap: 12px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px 12px;
   flex: 1;
   min-height: 0;
 }
 
 .tw-pane {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-row: span 2;
+  grid-template-rows: subgrid;
   min-height: 0;
   min-width: 0;
 }
 
 /* ---------------------------------------------------------------------------
- * Controls: the toolbar above the tag list (filter, Select All, Cancel,
- * "N selected") and label + input pairs such as the case style picker
+ * Controls: the pane headers (filter, Select All, Deselect, "N selected"
+ * above the tag list; titles above the other boxes) and label + input pairs
+ * such as the case style picker
  * ------------------------------------------------------------------------- */
 
-.tw-toolbar {
+.tw-pane-header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 10px;
+  min-height: var(--tw-row);
 }
 
-.tw-toolbar input[type="search"],
-.tw-toolbar input[type="text"] {
+.tw-pane-header input[type="search"] {
   flex: 1;
   min-width: 120px;
+}
+
+.tw-pane-title {
+  font-weight: 600;
 }
 
 .tw-field {

@@ -30,6 +30,7 @@ export type FluentMessageId =
   | 'dup-fuzzy-reason-plural'
   | 'dup-fuzzy-reason-typo'
   | 'dup-fuzzy-title'
+  | 'dup-groups-title'
   | 'dup-keep'
   | 'dup-level'
   | 'dup-merge-group'

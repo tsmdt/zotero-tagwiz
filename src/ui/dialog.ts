@@ -490,20 +490,18 @@ export class TagWizDialog {
       );
     }
 
+    this.controlsEl = h(doc, "div", { class: "tw-options" });
+    const menu = h(doc, "div", { class: "tw-menu" }, tabs, this.controlsEl);
+
     this.leftEl = h(doc, "div", { class: "tw-pane" });
-    this.controlsEl = h(doc, "div", { class: "tw-pane" });
-    this.previewEl = h(doc, "div", {
-      class: "tw-pane",
-      style: "flex:1;min-height:0",
-    });
-    const right = h(
+    this.previewEl = h(doc, "div", { class: "tw-pane" });
+    const body = h(
       doc,
       "div",
-      { class: "tw-pane" },
-      this.controlsEl,
+      { class: "tw-main" },
+      this.leftEl,
       this.previewEl,
     );
-    const body = h(doc, "div", { class: "tw-main" }, this.leftEl, right);
     const note = h(
       doc,
       "div",
@@ -512,7 +510,7 @@ export class TagWizDialog {
     );
     this.footerEl = h(doc, "div", { class: "tw-footer" });
 
-    append(this.root, [header, tabs, body, note, this.footerEl]);
+    append(this.root, [header, menu, body, note, this.footerEl]);
   }
 
   private renderAll() {
@@ -600,7 +598,7 @@ export class TagWizDialog {
     const toolbar = h(
       doc,
       "div",
-      { class: "tw-toolbar" },
+      { class: "tw-pane-header" },
       h(doc, "input", {
         type: "search",
         placeholder: getString("filter-placeholder"),
@@ -839,7 +837,6 @@ export class TagWizDialog {
       for (const r of names)
         list.appendChild(h(doc, "option", { value: r.name }));
       append(this.controlsEl, [
-        h(doc, "div", { class: "tw-hint" }, getString("unify-hint")),
         h(
           doc,
           "div",
@@ -858,35 +855,46 @@ export class TagWizDialog {
           }),
           list,
         ),
+        h(doc, "div", { class: "tw-hint" }, getString("unify-hint")),
       ]);
     } else if (this.tab === "remove") {
       append(this.controlsEl, [
         h(doc, "div", { class: "tw-hint" }, getString("remove-hint")),
+      ]);
+    } else if (this.tab === "duplicates") {
+      const tier = h(doc, "select", {
+        id: "tw-tier",
+        onchange: (e: Event) => {
+          this.dupTier = (e.target as HTMLSelectElement).value as DuplicateTier;
+          this.recomputeGroups();
+          this.renderLeft();
+          this.refreshPlan();
+        },
+      });
+      for (const [value, label] of DUP_TIERS) {
+        tier.appendChild(
+          h(
+            doc,
+            "option",
+            { value, selected: value === this.dupTier },
+            getString(label),
+          ),
+        );
+      }
+      append(this.controlsEl, [
+        h(
+          doc,
+          "div",
+          { class: "tw-field" },
+          h(doc, "label", { for: "tw-tier" }, getString("dup-level")),
+          tier,
+        ),
       ]);
     }
   }
 
   private renderDuplicates() {
     const { doc } = this;
-    const tier = h(doc, "select", {
-      id: "tw-tier",
-      onchange: (e: Event) => {
-        this.dupTier = (e.target as HTMLSelectElement).value as DuplicateTier;
-        this.recomputeGroups();
-        this.renderLeft();
-        this.refreshPlan();
-      },
-    });
-    for (const [value, label] of DUP_TIERS) {
-      tier.appendChild(
-        h(
-          doc,
-          "option",
-          { value, selected: value === this.dupTier },
-          getString(label),
-        ),
-      );
-    }
     const scroll = h(doc, "div", { class: "tw-scroll-box" });
 
     if (!this.groups.length) {
@@ -1015,9 +1023,13 @@ export class TagWizDialog {
       h(
         doc,
         "div",
-        { class: "tw-field" },
-        h(doc, "label", { for: "tw-tier" }, getString("dup-level")),
-        tier,
+        { class: "tw-pane-header" },
+        h(
+          doc,
+          "span",
+          { class: "tw-pane-title" },
+          getString("dup-groups-title"),
+        ),
       ),
       scroll,
     ]);
@@ -1038,8 +1050,8 @@ export class TagWizDialog {
     const head = h(
       doc,
       "div",
-      { class: "tw-section-title", style: "margin:0" },
-      getString("preview-title"),
+      { class: "tw-pane-header" },
+      h(doc, "span", { class: "tw-pane-title" }, getString("preview-title")),
     );
     if (!rows.length) {
       append(this.previewEl, [

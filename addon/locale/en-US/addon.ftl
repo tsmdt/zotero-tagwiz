@@ -45,6 +45,7 @@ dup-level = Treat as duplicates
 dup-exact = Same name, different type
 dup-case = Ignoring case
 dup-normalized = Ignoring case, spaces, “-” and “_”
+dup-groups-title = Duplicate groups
 dup-none = No duplicates found among the shown tags.
 dup-merge-group = Merge this group
 dup-keep = Keep
