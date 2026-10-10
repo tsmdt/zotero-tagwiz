@@ -4,9 +4,11 @@ import type { Op, TagRef, TagType } from "../src/core/types";
 import { applyOps, undoJournal } from "../src/zotero/engine";
 import { preflight } from "../src/zotero/guard";
 import {
+  findUndoable,
   latestUndoable,
   listJournalIDs,
   newJournalID,
+  pruneJournals,
   readJournal,
   writeJournal,
 } from "../src/zotero/journal";
@@ -234,6 +236,95 @@ describe("engine (in Zotero)", function () {
 
   itx("preflight accepts the user library", function () {
     assert.isTrue(preflight(libraryID).ok);
+  });
+
+  describe("tags stored in a non-NFC form", function () {
+    /** Store `tag` decomposed (NFD), as old imports could, and reload Zotero's tag cache. */
+    async function decompose(tag: string) {
+      await Zotero.DB.executeTransaction(async () => {
+        await Zotero.DB.queryAsync("UPDATE tags SET name=? WHERE name=?", [
+          tag.normalize("NFD"),
+          tag,
+        ]);
+      });
+      await (Zotero.Tags as any).init();
+    }
+
+    /** Tag names stored for `item`, read straight from the database. */
+    async function storedNames(item: Zotero.Item): Promise<string[]> {
+      return (await Zotero.DB.columnQueryAsync(
+        "SELECT name FROM itemTags JOIN tags USING (tagID) WHERE itemID=?",
+        [item.id],
+      )) as string[];
+    }
+
+    itx("lists, renames and removes them", async function () {
+      const [x, y, z] = [name("café"), name("cy"), name("crème")];
+      const a = await makeItem([x]);
+      const b = await makeItem([z]);
+      await decompose(x);
+      await decompose(z);
+      assert.deepEqual(await storedNames(a), [x.normalize("NFD")]);
+
+      const listed = (await loadTags(libraryID)).filter((t) => t.name === x);
+      assert.lengthOf(listed, 1);
+      assert.deepEqual(await typesOf(libraryID, x), [0]);
+
+      const renamed = await rename(x, y);
+      assert.equal(renamed.status, "done");
+      assert.equal(renamed.skippedTasks, 0);
+      assert.deepEqual(await storedNames(a), [y]);
+
+      const removed = await run([{ kind: "remove", tag: await ref(z) }]);
+      assert.equal(removed.status, "done");
+      assert.equal(removed.skippedTasks, 0);
+      assert.deepEqual(await storedNames(b), []);
+    });
+
+    itx("renames a name stored in two forms on every item", async function () {
+      const [x, other, y] = [name("née"), name("tmp"), name("ny")];
+      const a = await makeItem([x]);
+      const b = await makeItem([other]);
+      // b's tag becomes the NFD twin of a's NFC one.
+      await Zotero.DB.executeTransaction(async () => {
+        await Zotero.DB.queryAsync("UPDATE tags SET name=? WHERE name=?", [
+          x.normalize("NFD"),
+          other,
+        ]);
+      });
+      await (Zotero.Tags as any).init();
+      await (Zotero.Items as any).reload([a.id, b.id], ["tags"], true);
+
+      const listed = (await loadTags(libraryID)).filter((t) => t.name === x);
+      assert.lengthOf(listed, 1);
+      assert.equal(listed[0].itemCount, 2);
+
+      const result = await rename(x, y);
+
+      assert.equal(result.status, "done");
+      assert.deepEqual(await storedNames(a), [y]);
+      assert.deepEqual(await storedNames(b), [y]);
+      assert.deepEqual(await typesOf(libraryID, x), []);
+    });
+
+    itx("reports a task whose tag is gone as skipped", async function () {
+      const x = name("gone");
+      const item = await makeItem([x]);
+      const allTags = await loadTags(libraryID);
+      const from = await ref(x);
+      item.removeTag(x);
+      await item.saveTx();
+
+      const result = await applyOps({
+        libraryID,
+        allTags,
+        ops: [{ kind: "rename", from, to: name("gt") }],
+      });
+
+      assert.equal(result.status, "done");
+      assert.equal(result.completedTasks, 1);
+      assert.equal(result.skippedTasks, 1);
+    });
   });
 
   describe("rename", function () {
@@ -576,22 +667,161 @@ describe("engine (in Zotero)", function () {
       },
     );
 
-    itx("skips unreadable journal files", async function () {
-      const [x, y] = [name("jx"), name("jy")];
-      await makeItem([x]);
-      const result = await rename(x, y);
-      const broken = PathUtils.join(
-        Zotero.DataDirectory.dir,
-        "tagwiz",
-        `${newJournalID()}-broken.json`,
-      );
-      await IOUtils.writeUTF8(broken, '{"version": 1, "id": "trunc');
-      try {
-        const latest = await latestUndoable(libraryID);
-        assert.equal(latest?.id, result.journalId);
-      } finally {
-        await IOUtils.remove(broken, { ignoreAbsent: true });
-      }
+    itx(
+      "reports unreadable journals newer than the undoable one",
+      async function () {
+        const [x, y] = [name("jx"), name("jy")];
+        await makeItem([x]);
+        const result = await rename(x, y);
+        const brokenID = `${newJournalID()}-broken`;
+        const broken = PathUtils.join(
+          Zotero.DataDirectory.dir,
+          "tagwiz",
+          `${brokenID}.json`,
+        );
+        await IOUtils.writeUTF8(broken, '{"version": 1, "id": "trunc');
+        try {
+          const found = await findUndoable(libraryID);
+          assert.equal(found.journal?.id, result.journalId);
+          assert.deepEqual(found.unreadable, [brokenID]);
+          // Older unreadable files do not matter: the newest journal wins.
+          const latest = await latestUndoable(libraryID);
+          assert.equal(latest?.id, result.journalId);
+        } finally {
+          await IOUtils.remove(broken, { ignoreAbsent: true });
+        }
+      },
+    );
+
+    itx(
+      "writes journals without leaving temporary files behind",
+      async function () {
+        const [x, y] = [name("wx"), name("wy")];
+        await makeItem([x]);
+        const result = await rename(x, y);
+        const dir = PathUtils.join(Zotero.DataDirectory.dir, "tagwiz");
+        const tmpFiles = async () =>
+          ((await IOUtils.getChildren(dir)) as string[]).filter((p) =>
+            p.endsWith(".tmp"),
+          );
+        assert.deepEqual(await tmpFiles(), []);
+        assert.equal((await readJournal(result.journalId)).status, "done");
+
+        // A write interrupted by a crash leaves its temporary file; the next
+        // prune removes it.
+        const stray = PathUtils.join(dir, `${result.journalId}.json.tmp`);
+        await IOUtils.writeUTF8(stray, '{"trunc');
+        await pruneJournals();
+        assert.deepEqual(await tmpFiles(), []);
+        assert.equal((await readJournal(result.journalId)).status, "done");
+      },
+    );
+
+    /** Journal-shaped data for files written straight to disk. */
+    const fakeJournal = (id: string, library: number) => ({
+      version: 1 as const,
+      id,
+      createdAt: new Date().toISOString(),
+      libraryID: library,
+      status: "done" as const,
+      tasks: [],
+      completedTasks: 0,
+      before: [],
+    });
+    const journalPath = (id: string) =>
+      PathUtils.join(Zotero.DataDirectory.dir, "tagwiz", `${id}.json`);
+
+    itx(
+      "treats a parseable journal of the wrong shape as unreadable",
+      async function () {
+        const id = `${newJournalID()}-shape`;
+        const { before: _before, ...damaged } = fakeJournal(id, libraryID);
+        await IOUtils.writeJSON(journalPath(id), damaged);
+        try {
+          let error: unknown;
+          try {
+            await readJournal(id);
+          } catch (e) {
+            error = e;
+          }
+          assert.exists(error);
+          assert.include((await findUndoable(libraryID)).unreadable, id);
+        } finally {
+          await IOUtils.remove(journalPath(id), { ignoreAbsent: true });
+        }
+      },
+    );
+
+    itx(
+      "new journals sort after existing ones even if the clock went back",
+      async function () {
+        const future = "9999-12-31T00-00-00-000Z";
+        await writeJournal(fakeJournal(future, -1));
+        const x = name("cx");
+        await makeItem([x]);
+        let result: Awaited<ReturnType<typeof rename>> | undefined;
+        try {
+          result = await rename(x, name("cy"));
+          // listJournalIDs sorts by plain string order.
+          assert.isTrue(result.journalId > future, result.journalId);
+          assert.equal((await listJournalIDs())[0], result.journalId);
+        } finally {
+          await IOUtils.remove(journalPath(future), { ignoreAbsent: true });
+          if (result) {
+            await IOUtils.remove(journalPath(result.journalId), {
+              ignoreAbsent: true,
+            });
+          }
+        }
+      },
+    );
+
+    itx(
+      "keeps the newest journals of each library when pruning",
+      async function () {
+        // Libraries that do not exist: prune only reads their IDs.
+        const [quiet, busy] = [-2, -3];
+        const base = newJournalID();
+        const quietID = `${base}-a`;
+        const busyIDs = Array.from(
+          { length: 12 },
+          (_, i) => `${base}-b${String(i).padStart(2, "0")}`,
+        );
+        await writeJournal(fakeJournal(quietID, quiet));
+        for (const id of busyIDs) await writeJournal(fakeJournal(id, busy));
+        try {
+          await pruneJournals();
+          const ids = await listJournalIDs();
+          assert.include(ids, quietID, "another library's journal is kept");
+          const keptBusy = busyIDs.filter((id) => ids.includes(id));
+          // Newest first: the two oldest of the busy library are dropped.
+          assert.deepEqual(keptBusy, busyIDs.slice(2));
+        } finally {
+          for (const id of [quietID, ...busyIDs]) {
+            await IOUtils.remove(journalPath(id), { ignoreAbsent: true });
+          }
+        }
+      },
+    );
+
+    itx("reports only the tags undo actually restored", async function () {
+      const [a, b, gone] = [name("ra"), name("rb"), name("rg")];
+      await makeItem([a]);
+      const goneItem = await makeItem([gone]);
+      const allTags = await loadTags(libraryID);
+      const ops: Op[] = [
+        { kind: "rename", from: await ref(a), to: b },
+        { kind: "rename", from: await ref(gone), to: name("rh") },
+      ];
+      goneItem.removeTag(gone);
+      await goneItem.saveTx();
+      const result = await applyOps({ libraryID, allTags, ops });
+      assert.equal(result.skippedTasks, 1);
+
+      const undone = await undoJournal(result.journalId);
+
+      // a and b changed back; the skipped rename's names did not change.
+      assert.deepEqual(undone, { ok: true, restoredTags: 2 });
     });
   });
 
