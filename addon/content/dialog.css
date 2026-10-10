@@ -30,10 +30,19 @@
   --tw-muted: color-mix(in srgb, CanvasText 60%, transparent);
   --tw-hover: color-mix(in srgb, CanvasText 7%, transparent);
   --tw-band: color-mix(in srgb, CanvasText 5%, Canvas);
+  --tw-field: #fff;
   --tw-row: 30px;
   --tw-accent: AccentColor;
   --tw-warn: #b45309;
   --tw-error: #b91c1c;
+}
+
+/* Text fields and scroll boxes: white in light mode, the page color in dark
+ * mode so their (light) text stays readable */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tw-field: Canvas;
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -257,7 +266,7 @@ button:not(.tw-tab, .tw-sort-button) {
 input[type="search"],
 input[type="text"] {
   padding: 0 8px;
-  background: #fff;
+  background: var(--tw-field);
 }
 
 input[type="search"]::placeholder,
@@ -302,7 +311,7 @@ button:not(.tw-tab, .tw-sort-button):disabled {
   overflow: auto;
   border: 1px solid var(--tw-border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--tw-field);
 }
 
 /* A box with only a message ("Nothing to change"): centered both ways. */
