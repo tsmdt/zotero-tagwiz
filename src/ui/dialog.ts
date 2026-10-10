@@ -505,7 +505,7 @@ export class TagWizDialog {
     const note = h(
       doc,
       "div",
-      { class: "tw-hint" },
+      { class: "tw-alert" },
       getString("edits-library-wide"),
     );
     this.footerEl = h(doc, "div", { class: "tw-footer" });

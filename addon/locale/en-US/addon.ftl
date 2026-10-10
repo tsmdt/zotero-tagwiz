@@ -7,7 +7,7 @@ dialog-no-library = Select a library or collection first.
 scope-collection = Tags used in “{ $collection }”
 scope-library = Showing all tags in “{ $library }”
 include-subcollections = Include subcollections
-edits-library-wide = Changes always apply to the whole library, not only to this collection.
+edits-library-wide = → Changes always apply to the whole library, not only to this collection.
 
 tab-case = Change Case
 tab-unify = Merge
