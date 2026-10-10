@@ -44,7 +44,7 @@ async function open(): Promise<void> {
     Zotero.getMainWindow() as any,
     DIALOG_URL,
     "tagwiz-dialog",
-    "chrome,centerscreen,resizable,width=800,height=600",
+    "chrome,centerscreen,resizable,width=980,height=720",
     null as any,
   ) as unknown as Window;
   addon.data.dialog = win;

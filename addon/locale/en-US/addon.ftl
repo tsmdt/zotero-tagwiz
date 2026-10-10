@@ -1,16 +1,16 @@
-menuitem-collection-label = Open TagWiz
-menuitem-tools-label = Open TagWiz
+menuitem-collection-label = 🏷️ TagWiz
+menuitem-tools-label = 🏷️ TagWiz
 
-dialog-title = TagWiz
+dialog-title = 🏷️ TagWiz
 dialog-no-library = Select a library or collection first.
 
 scope-collection = Tags used in “{ $collection }”
-scope-library = All tags in “{ $library }”
+scope-library = Showing all tags in “{ $library }”
 include-subcollections = Include subcollections
 edits-library-wide = Changes always apply to the whole library, not only to this collection.
 
 tab-case = Change Case
-tab-unify = Unify
+tab-unify = Merge
 tab-remove = Remove
 tab-duplicates = Duplicates
 
@@ -38,7 +38,7 @@ case-kebab = kebab-case
 case-keep-acronyms = Keep ALL-CAPS words (Title/Sentence case)
 case-preserve-prefix = Keep the part before “:” or “/”
 
-unify-target = Unify into
+unify-target = Merge into
 unify-hint = Select the tags to merge, then choose or type the name they should all become.
 remove-hint = Select the tags to delete from every item in the library.
 
@@ -50,7 +50,7 @@ dup-none = No duplicates found among the shown tags.
 dup-merge-group = Merge this group
 dup-keep = Keep
 dup-fuzzy-title = Possible typos and plurals (review each one yourself)
-dup-fuzzy-action = Unify…
+dup-fuzzy-action = Merge...
 dup-fuzzy-reason-typo = typo?
 dup-fuzzy-reason-plural = plural?
 dup-fuzzy-more = Showing the first { $shown } of { $total }.
@@ -76,7 +76,7 @@ impact-library = Affects { $total } items in the library.
 apply = Apply
 cancel = Cancel
 close = Close
-undo-last = Undo last run
+undo-last = Undo Latest Edit
 
 confirm-title = Apply changes?
 confirm-body = Apply { $changes } changes to { $items } items in the library ({ $outside } outside this collection or in the trash)?

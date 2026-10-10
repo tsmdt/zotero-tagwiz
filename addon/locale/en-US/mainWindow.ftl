@@ -1,4 +1,4 @@
 menu-collection =
-    .label = Open TagWiz
+    .label = 🏷️ TagWiz
 menu-tools =
-    .label = Open TagWiz
+    .label = 🏷️ TagWiz
