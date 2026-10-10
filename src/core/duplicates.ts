@@ -16,16 +16,20 @@ export interface FuzzyPair {
 }
 
 /**
- * Most-used first, then colored, then manual, then a stable name order
- * (prefers names containing uppercase, i.e. the "nicer" spelling, then lexical).
+ * Most-used name first (manual and automatic uses counted together), then
+ * colored, then manual, then a stable name order (prefers names containing
+ * uppercase, i.e. the "nicer" spelling, then lexical).
  * If the winning name also exists as a manual tag, the manual one is returned,
  * so merging never turns manual tags into automatic ones by default.
  */
 export function pickCanonical(members: readonly TagRef[]): TagRef {
   const hasUpper = (t: TagRef) => t.name !== t.name.toLowerCase();
+  const uses = new Map<string, number>();
+  for (const m of members)
+    uses.set(m.name, (uses.get(m.name) ?? 0) + m.itemCount);
   const best = [...members].sort(
     (x, y) =>
-      y.itemCount - x.itemCount ||
+      uses.get(y.name)! - uses.get(x.name)! ||
       Number(!!y.color) - Number(!!x.color) ||
       x.type - y.type ||
       Number(hasUpper(y)) - Number(hasUpper(x)) ||
@@ -90,32 +94,77 @@ export function withinOneEdit(a: string, b: string): boolean {
 /**
  * Suggest-only candidates: single typos and simple plurals among tags that are
  * NOT already exact/case/normalized duplicates. Names must be >= 5 chars and
- * share a first character to keep false positives and runtime down.
+ * share a first character to keep false positives down. A name used as manual
+ * and automatic tag counts once. Most-used pairs come first.
+ *
+ * Runs in O(n · length²) instead of comparing all pairs: keys one edit apart
+ * either share a "deleted at i" variant (substitution at i), or one key is
+ * a deletion variant of the other (insertion/deletion).
  */
 export function findFuzzyPairs(tags: readonly TagRef[]): FuzzyPair[] {
-  const items = tags
-    .map((tag) => ({ tag, key: duplicateKey(tag.name, "normalized") }))
+  const byName = new Map<string, TagRef>();
+  for (const tag of tags) {
+    const seen = byName.get(tag.name);
+    if (!seen || tag.itemCount > seen.itemCount) byName.set(tag.name, tag);
+  }
+  const items = [...byName.values()]
+    .map((tag) => {
+      const key = duplicateKey(tag.name, "normalized");
+      return { tag, key, chars: Array.from(key) };
+    })
     .filter((x) => x.key.length >= 5);
-  const byFirst = new Map<string, typeof items>();
+  type Item = (typeof items)[number];
+
+  const byKey = new Map<string, Item[]>();
+  const bySubstitution = new Map<string, Item[]>();
+  const push = (map: Map<string, Item[]>, key: string, item: Item) => {
+    const list = map.get(key);
+    if (list) list.push(item);
+    else map.set(key, [item]);
+  };
+  const without = (chars: string[], i: number) =>
+    chars.slice(0, i).join("") + chars.slice(i + 1).join("");
   for (const item of items) {
-    const bucket = byFirst.get(item.key[0]);
-    if (bucket) bucket.push(item);
-    else byFirst.set(item.key[0], [item]);
+    push(byKey, item.key, item);
+    // i = 0 would change the first character.
+    for (let i = 1; i < item.chars.length; i++) {
+      push(bySubstitution, `${i}\u0000${without(item.chars, i)}`, item);
+    }
   }
 
   const pairs: FuzzyPair[] = [];
-  for (const bucket of byFirst.values()) {
+  const seen = new Set<string>();
+  const add = (x: Item, y: Item) => {
+    if (x.key === y.key || x.chars[0] !== y.chars[0]) return;
+    const id = [x.tag.name, y.tag.name].sort().join("\u0000");
+    if (seen.has(id)) return;
+    seen.add(id);
+    const [short, long] =
+      x.key.length <= y.key.length ? [x.key, y.key] : [y.key, x.key];
+    const plural = long === short + "s";
+    pairs.push({ a: x.tag, b: y.tag, reason: plural ? "plural" : "typo" });
+  };
+  for (const bucket of bySubstitution.values()) {
     for (let i = 0; i < bucket.length; i++) {
-      for (let j = i + 1; j < bucket.length; j++) {
-        const x = bucket[i];
-        const y = bucket[j];
-        if (x.key === y.key || !withinOneEdit(x.key, y.key)) continue;
-        const [short, long] =
-          x.key.length <= y.key.length ? [x.key, y.key] : [y.key, x.key];
-        const plural = long === short + "s";
-        pairs.push({ a: x.tag, b: y.tag, reason: plural ? "plural" : "typo" });
+      for (let j = i + 1; j < bucket.length; j++) add(bucket[i], bucket[j]);
+    }
+  }
+  for (const item of items) {
+    for (let i = 0; i < item.chars.length; i++) {
+      for (const shorter of byKey.get(without(item.chars, i)) ?? []) {
+        add(shorter, item);
       }
     }
   }
-  return pairs;
+  return pairs.sort(
+    (p, q) =>
+      q.a.itemCount + q.b.itemCount - (p.a.itemCount + p.b.itemCount) ||
+      byPairName(p, q),
+  );
+}
+
+function byPairName(p: FuzzyPair, q: FuzzyPair): number {
+  const a = `${p.a.name}\u0000${p.b.name}`;
+  const b = `${q.a.name}\u0000${q.b.name}`;
+  return a < b ? -1 : a > b ? 1 : 0;
 }

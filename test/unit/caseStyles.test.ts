@@ -71,6 +71,30 @@ describe("convertCase", function () {
     assert.equal(c(name, "snake", off), "llm_framework_studies");
   });
 
+  it("keeps mixed-case words by default, optionally not", function () {
+    assert.equal(c("iPhone apps", "title"), "iPhone Apps");
+    assert.equal(c("McDonald's history", "title"), "McDonald's History");
+    assert.equal(c("the LaTeX guide", "title"), "The LaTeX Guide");
+    assert.equal(c("iPhone Apps", "sentence"), "iPhone apps");
+    assert.equal(c("NaCl Solutions", "lower"), "NaCl solutions");
+    assert.equal(
+      c("iPhone apps", "title", { keepAcronyms: false }),
+      "Iphone Apps",
+    );
+    // Only a capital after the first letter counts, not a capitalized word.
+    assert.equal(c("Machine Learning", "lower"), "machine learning");
+  });
+
+  it("keeps punctuation other than separators in identifier styles", function () {
+    assert.equal(c("C++ programming", "snake"), "c++_programming");
+    assert.equal(c("C# basics", "kebab"), "c#-basics");
+    assert.equal(c("C++ programming", "camel"), "c++Programming");
+    assert.equal(c("C++ programming", "pascal"), "C++Programming");
+    assert.equal(c("COVID-19 vaccines", "snake"), "COVID_19_vaccines");
+    assert.equal(c("R&D funding", "kebab"), "R&D-funding");
+    assert.notEqual(c("C++ programming", "snake"), c("C programming", "snake"));
+  });
+
   it("handles non-Latin scripts and diacritics", function () {
     assert.equal(c("機械学習", "title"), "機械学習");
     assert.equal(c("école normale", "title"), "École Normale");
@@ -105,7 +129,7 @@ describe("convertCase", function () {
   it("converts the whole tag when the prefix does not match exactly", function () {
     assert.equal(
       c("tech: deep learning", "camel", { prefix: "TECH: " }),
-      "techDeepLearning",
+      "tech:DeepLearning",
     );
     assert.equal(c("Deep Learning", "lower", { prefix: "" }), "deep learning");
     assert.equal(c("topic:machine", "upper"), "TOPIC:MACHINE");
@@ -136,9 +160,19 @@ describe("convertCase", function () {
         "deep NLP models",
         "a_b-c d",
         "x",
+        "iPhone apps",
+        "McDonald's history",
+        "C++ programming",
+        "R&D funding",
       ]) {
-        const once = c(name, style);
-        assert.equal(c(once, style), once, `${style}: ${name}`);
+        for (const keepAcronyms of [true, false]) {
+          const once = c(name, style, { keepAcronyms });
+          assert.equal(
+            c(once, style, { keepAcronyms }),
+            once,
+            `${style} (keepAcronyms=${keepAcronyms}): ${name}`,
+          );
+        }
       }
     }
   });

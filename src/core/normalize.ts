@@ -6,6 +6,9 @@ export function tierRank(tier: DuplicateTier): number {
   return TIER_ORDER.indexOf(tier);
 }
 
+/** A Latin or Greek letter followed by the combining marks (accents) to drop. */
+const ACCENTED = /([\p{Script=Latin}\p{Script=Greek}])\p{M}+/gu;
+
 /** NFC + trim, what Zotero itself stores (see Zotero.Tags.cleanData). */
 export function cleanName(name: string): string {
   return name.normalize("NFC").trim();
@@ -17,9 +20,12 @@ export function cleanName(name: string): string {
  * - exact:      same name after NFC + trim
  * - case:       ... ignoring case and runs of whitespace
  * - normalized: ... treating whitespace, "_" and "-" as the same separator,
- *               splitting camelCase, folding diacritics and compatibility forms.
+ *               splitting camelCase, folding accents on Latin and Greek
+ *               letters and compatibility forms.
  *
  * Other punctuation is deliberately kept, so "C++", "C#" and "C" never collide.
+ * Combining marks of other scripts are kept too: there they tell letters
+ * apart (Japanese が/か, Devanagari vowel signs, Cyrillic й/и).
  */
 export function duplicateKey(name: string, tier: DuplicateTier): string {
   const clean = cleanName(name);
@@ -31,7 +37,8 @@ export function duplicateKey(name: string, tier: DuplicateTier): string {
 
   const folded = spaced
     .normalize("NFKD")
-    .replace(/\p{M}+/gu, "")
+    .replace(ACCENTED, "$1")
+    .normalize("NFC")
     .replace(/(\p{Ll}|\p{N})(\p{Lu})/gu, "$1 $2")
     .toLowerCase()
     .replace(/[\s_-]+/gu, " ")

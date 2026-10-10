@@ -3,7 +3,7 @@ import type { Op, TagRef, TagType } from "../core/types";
 import { preflight } from "./guard";
 import {
   Journal,
-  newJournalID,
+  nextJournalID,
   pruneJournals,
   readJournal,
   writeJournal,
@@ -12,13 +12,22 @@ import {
   captureStates,
   getColorOf,
   itemsWithTag,
+  tagIDsOf,
   TagState,
   typesOf,
 } from "./tagStore";
 
 const ITEM_CHUNK = 200;
-/** Tag edits must not touch the user-visible "Date Modified". */
-const SAVE_OPTIONS = { skipDateModifiedUpdate: true };
+/**
+ * Tag edits must not touch the user-visible "Date Modified".
+ *
+ * skipEditCheck: Zotero refuses to save some items of an editable library,
+ * e.g. annotations other members created in a group library. Its own bulk
+ * tag operations (Zotero.Tags.rename and removeFromLibrary, used on the fast
+ * paths here) change their tags anyway, so the per-item paths do the same
+ * instead of failing half-way. editItems checks the library itself.
+ */
+const SAVE_OPTIONS = { skipDateModifiedUpdate: true, skipEditCheck: true };
 
 export interface ApplyOptions {
   libraryID: number;
@@ -35,6 +44,8 @@ export interface ApplyResult {
   status: "done" | "failed" | "cancelled";
   completedTasks: number;
   totalTasks: number;
+  /** Completed tasks that changed nothing: their tag was no longer in use. */
+  skippedTasks: number;
   error?: string;
 }
 
@@ -63,15 +74,27 @@ async function setColor(
 
 type TagData = { tag: string; type: number };
 
-/** Load `ids`, let `mutate` change their tags, and save them in transactions of ITEM_CHUNK. */
+/**
+ * Load `ids`, let `mutate` change their tags, and save them in transactions
+ * of ITEM_CHUNK. Items of other libraries are left alone. Saves skip Zotero's
+ * per-item edit check (see SAVE_OPTIONS), so the library's own permission is
+ * checked here, before every chunk: it can change during a long run.
+ */
 async function editItems(
+  libraryID: number,
   ids: readonly number[],
   mutate: (item: Zotero.Item) => void,
 ): Promise<void> {
   for (let i = 0; i < ids.length; i += ITEM_CHUNK) {
-    const items = (await Zotero.Items.getAsync(
-      ids.slice(i, i + ITEM_CHUNK) as number[],
-    )) as Zotero.Item[];
+    const library = Zotero.Libraries.get(libraryID);
+    if (!library || !library.editable) {
+      throw new Error("The library is not editable");
+    }
+    const items = (
+      (await Zotero.Items.getAsync(
+        ids.slice(i, i + ITEM_CHUNK) as number[],
+      )) as Zotero.Item[]
+    ).filter((item) => item && item.libraryID === libraryID);
     await (Zotero.Items as any).loadDataTypes(items, ["tags"]);
     await Zotero.DB.executeTransaction(async () => {
       for (const item of items) {
@@ -82,11 +105,12 @@ async function editItems(
   }
 }
 
+/** Delete the stored forms of `name` that no item uses any more. */
 async function purgeTag(name: string) {
-  const id = Zotero.Tags.getID(name);
-  if (id) {
+  const ids = await tagIDsOf([name]);
+  if (ids.length) {
     await Zotero.DB.executeTransaction(async () => {
-      await Zotero.Tags.purge([id]);
+      await Zotero.Tags.purge(ids);
     });
   }
 }
@@ -98,7 +122,7 @@ async function purgeTag(name: string) {
  */
 async function renamePerItem(libraryID: number, from: string, to: string) {
   const ids = (await itemsWithTag(libraryID, from)).map((r) => r.id);
-  await editItems(ids, (item) => {
+  await editItems(libraryID, ids, (item) => {
     const tags = item.getTags() as TagData[];
     const source = tags.find((t) => t.tag === from);
     if (!source) return;
@@ -109,14 +133,32 @@ async function renamePerItem(libraryID: number, from: string, to: string) {
     else rest.push({ tag: to, type: sourceType });
     item.setTags(rest);
   });
+  // A save removes a tag by the one ID Zotero.Tags.getID knows, so rows of
+  // the name's other stored forms (see tagIDsOf) are left: remove them by ID.
+  // Their items already got `to` above, as Zotero lists every form by name.
+  const fromIDs = await tagIDsOf([from]);
+  if (fromIDs.length > 1 && (await typesOf(libraryID, from)).length) {
+    await Zotero.Tags.removeFromLibrary(
+      libraryID,
+      fromIDs,
+      () => {},
+      // undefined = every type; typings require an array.
+      undefined as unknown as number[],
+    );
+  }
   await purgeTag(from);
 }
 
-async function runRename(libraryID: number, from: string, to: string) {
+/** Each run* returns false if there was nothing to do (tag no longer used). */
+async function runRename(
+  libraryID: number,
+  from: string,
+  to: string,
+): Promise<boolean> {
   const fromTypes = await typesOf(libraryID, from);
   if (!fromTypes.length) {
     log("skip rename, source no longer used", from);
-    return;
+    return false;
   }
   const toTypes = await typesOf(libraryID, to);
 
@@ -125,8 +167,12 @@ async function runRename(libraryID: number, from: string, to: string) {
   // Keep the target's own color: Zotero.Tags.rename would overwrite it with the source's.
   if (sourceColor && targetColor) await setColor(libraryID, from, false);
 
-  // Zotero.Tags.rename forces type=0, so it is only safe if no automatic tag is involved.
-  const fast = [...fromTypes, ...toTypes].every((t) => t === 0);
+  // Zotero.Tags.rename forces type=0, so it is only safe if no automatic tag
+  // is involved. It also renames only the one stored form Zotero.Tags.getID
+  // knows, so a name stored in several forms (see tagIDsOf) goes per item.
+  const fast =
+    [...fromTypes, ...toTypes].every((t) => t === 0) &&
+    (await tagIDsOf([from])).length === 1;
   log("rename", from, "->", to, fast ? "(fast path)" : "(per-item path)");
   if (fast) {
     await Zotero.Tags.rename(libraryID, from, to);
@@ -137,42 +183,51 @@ async function runRename(libraryID: number, from: string, to: string) {
       await setColor(libraryID, to, sourceColor.color, sourceColor.position);
     }
   }
+  return true;
 }
 
-async function runRetype(libraryID: number, name: string, toType: TagType) {
-  const ids = (await itemsWithTag(libraryID, name))
-    .filter((r) => r.type !== toType)
-    .map((r) => r.id);
+async function runRetype(
+  libraryID: number,
+  name: string,
+  toType: TagType,
+): Promise<boolean> {
+  const tagged = await itemsWithTag(libraryID, name);
+  if (!tagged.length) {
+    log("skip retype, tag no longer used", name);
+    return false;
+  }
+  const ids = tagged.filter((r) => r.type !== toType).map((r) => r.id);
   log("retype", name, "->", toType, `(${ids.length} items)`);
-  await editItems(ids, (item) => {
+  await editItems(libraryID, ids, (item) => {
     const tags = (item.getTags() as TagData[]).map((t) =>
       t.tag === name ? { ...t, type: toType } : t,
     );
     item.setTags(tags);
   });
+  return true;
 }
 
 async function runRemove(
   libraryID: number,
   name: string,
   types: TagType[] | "all",
-) {
-  const id = Zotero.Tags.getID(name);
-  if (!id) {
-    log("skip remove, tag no longer exists", name);
-    return;
+): Promise<boolean> {
+  if (!(await typesOf(libraryID, name)).length) {
+    log("skip remove, tag no longer used", name);
+    return false;
   }
   log("remove", name, types);
   await Zotero.Tags.removeFromLibrary(
     libraryID,
-    [id],
+    await tagIDsOf([name]),
     () => {},
     // undefined = remove the whole tag (and its color); typings require an array.
     (types === "all" ? undefined : types) as number[],
   );
+  return true;
 }
 
-async function runTask(libraryID: number, task: Task) {
+async function runTask(libraryID: number, task: Task): Promise<boolean> {
   switch (task.kind) {
     case "rename":
       return runRename(libraryID, task.from, task.to);
@@ -200,13 +255,19 @@ export async function applyOps(opts: ApplyOptions): Promise<ApplyResult> {
 
   const tasks = toTasks(opts.ops, opts.allTags);
   if (!tasks.length) {
-    return { journalId: "", status: "done", completedTasks: 0, totalTasks: 0 };
+    return {
+      journalId: "",
+      status: "done",
+      completedTasks: 0,
+      totalTasks: 0,
+      skippedTasks: 0,
+    };
   }
 
   const names = affectedNames(tasks);
   const journal: Journal = {
     version: 1,
-    id: newJournalID(),
+    id: await nextJournalID(),
     createdAt: new Date().toISOString(),
     libraryID,
     status: "running",
@@ -218,13 +279,14 @@ export async function applyOps(opts: ApplyOptions): Promise<ApplyResult> {
 
   let status: ApplyResult["status"] = "done";
   let error: string | undefined;
+  let skippedTasks = 0;
   for (const [i, task] of tasks.entries()) {
     if (opts.isCancelled?.()) {
       status = "cancelled";
       break;
     }
     try {
-      await runTask(libraryID, task);
+      if (!(await runTask(libraryID, task))) skippedTasks++;
       journal.completedTasks = i + 1;
       await writeJournal(journal);
     } catch (e) {
@@ -263,6 +325,7 @@ export async function applyOps(opts: ApplyOptions): Promise<ApplyResult> {
     status,
     completedTasks: journal.completedTasks,
     totalTasks: tasks.length,
+    skippedTasks,
     error,
   };
 }
@@ -321,13 +384,23 @@ export async function undoJournal(
 
   // itemID -> (tag name -> type it must have afterwards, or null for "must not have")
   const wanted = new Map<number, Map<string, TagType | null>>();
+  /** Names whose items or color actually change back. */
+  const restored = new Set<string>();
   const want = (id: number, name: string, type: TagType | null) => {
     const perItem = wanted.get(id) ?? new Map<string, TagType | null>();
     perItem.set(name, type);
     wanted.set(id, perItem);
+    restored.add(name);
   };
   const currentByName = new Map(current.map((s) => [s.name, s]));
   for (const before of journal.before) {
+    const color = currentByName.get(before.name)?.color;
+    if (
+      color?.color !== before.color?.color ||
+      color?.position !== before.color?.position
+    ) {
+      restored.add(before.name);
+    }
     const now = new Map(
       (currentByName.get(before.name)?.items ?? []).map((x) => [x.id, x.type]),
     );
@@ -338,7 +411,7 @@ export async function undoJournal(
   }
 
   log("undo", journalID, `${wanted.size} items`);
-  await editItems([...wanted.keys()], (item) => {
+  await editItems(libraryID, [...wanted.keys()], (item) => {
     const changes = wanted.get(item.id)!;
     const tags = (item.getTags() as TagData[]).filter(
       (t) => !changes.has(t.tag),
@@ -362,5 +435,5 @@ export async function undoJournal(
 
   journal.status = "undone";
   await writeJournal(journal);
-  return { ok: true, restoredTags: names.length };
+  return { ok: true, restoredTags: restored.size };
 }

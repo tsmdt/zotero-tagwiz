@@ -23,13 +23,17 @@ export const DEFAULT_SMALL_WORDS: readonly string[] = [
 
 const WORD_RE = /[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N}'’]*/gu;
 
+/** Word separators of snake/kebab/camel/Pascal case, as in duplicateKey. */
+const SEPARATORS = /[\s_-]+/u;
+
 /**
- * Split an identifier-like string into words: on anything that is not a
- * letter/number/mark, and on lower→Upper and ACRONYMWord boundaries.
+ * Split an identifier-like string into words: on whitespace, "_" and "-",
+ * and on lower→Upper and ACRONYMWord boundaries. Other punctuation stays in
+ * its word, so "C++ programming" and "C programming" never collide.
  */
 export function splitWords(input: string): string[] {
   return input
-    .split(/[^\p{L}\p{M}\p{N}]+/u)
+    .split(SEPARATORS)
     .flatMap((part) =>
       part
         .replace(/(\p{Ll}|\p{N})(\p{Lu})/gu, "$1\u0000$2")
@@ -53,9 +57,16 @@ function isAcronym(word: string): boolean {
   );
 }
 
+/** Mixed case with a capital after the first letter: "iPhone", "McDonald's", "LaTeX". */
+function isMixedCase(word: string): boolean {
+  const rest = Array.from(word).slice(1).join("");
+  return /\p{Lu}/u.test(rest) && /\p{Ll}/u.test(word);
+}
+
 function convertBody(body: string, opts: CaseOptions): string {
   const keepAcronyms = opts.keepAcronyms ?? true;
-  const keep = (word: string) => keepAcronyms && isAcronym(word);
+  const keep = (word: string) =>
+    keepAcronyms && (isAcronym(word) || isMixedCase(word));
   switch (opts.style) {
     case "lower":
       return body.replace(WORD_RE, (word) =>
@@ -88,7 +99,7 @@ function convertBody(body: string, opts: CaseOptions): string {
       // Already a single camel/Pascal identifier: leave it alone. Re-splitting
       // is ambiguous (e.g. "aBCD") and would make the conversion non-idempotent.
       // A camel identifier may start with a kept acronym ("LLMframework").
-      const isIdentifier = !/[^\p{L}\p{M}\p{N}]/u.test(body);
+      const isIdentifier = !SEPARATORS.test(body);
       const startsRight =
         opts.style === "camel"
           ? /^\p{Ll}/u.test(body) || (keepAcronyms && /^\p{Lu}{2}/u.test(body))

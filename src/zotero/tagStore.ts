@@ -1,3 +1,4 @@
+import { cleanName } from "../core/normalize";
 import type { TagRef, TagType } from "../core/types";
 
 export interface Scope {
@@ -68,32 +69,76 @@ export function getColorOf(
   return position < 0 ? undefined : { color: list[position].color, position };
 }
 
+/**
+ * IDs of the stored tags that Zotero shows as one of `names` (cleaned names).
+ *
+ * Zotero cleans names (NFC + trim, see cleanName) when it loads them, so its
+ * APIs find a tag stored in another form, e.g. NFD from an old import, but a
+ * plain `WHERE name=?` does not. Zotero.Tags.getID covers such a tag; the
+ * SQL match covers the exact and decomposed spellings, so a name stored in
+ * two forms yields both IDs.
+ */
+export async function tagIDsOf(names: readonly string[]): Promise<number[]> {
+  const ids = new Set<number>();
+  const spellings = new Set<string>();
+  for (const name of names) {
+    const known = Zotero.Tags.getID(name);
+    if (known) ids.add(known);
+    spellings.add(name);
+    spellings.add(name.normalize("NFD"));
+  }
+  for (const part of chunks([...spellings], CHUNK)) {
+    const rows = await query(
+      `SELECT tagID AS id FROM tags WHERE name IN (${placeholders(part.length)})`,
+      part,
+    );
+    for (const r of rows) ids.add(r.id as number);
+  }
+  return [...ids];
+}
+
 /** Types (0 manual / 1 automatic) under which `name` is used in the library. */
 export async function typesOf(
   libraryID: number,
   name: string,
 ): Promise<TagType[]> {
+  const ids = await tagIDsOf([name]);
+  if (!ids.length) return [];
   const rows = await query(
     "SELECT DISTINCT it.type AS type FROM itemTags it " +
-      "JOIN tags t USING (tagID) JOIN items i USING (itemID) " +
-      "WHERE t.name=? AND i.libraryID=? ORDER BY it.type",
-    [name, libraryID],
+      "JOIN items i USING (itemID) " +
+      `WHERE it.tagID IN (${placeholders(ids.length)}) AND i.libraryID=? ` +
+      "ORDER BY it.type",
+    [...ids, libraryID],
   );
-  return rows.map((r) => (r.type ? 1 : 0));
+  return [...new Set(rows.map((r): TagType => (r.type ? 1 : 0)))];
 }
 
-/** All item IDs (trash included) that carry `name`, with the type on each. */
+/**
+ * All item IDs (trash included) that carry `name`, with the type on each.
+ * An item carrying two stored forms of the name counts once, as manual if
+ * either is manual.
+ */
 export async function itemsWithTag(
   libraryID: number,
   name: string,
 ): Promise<Array<{ id: number; type: TagType }>> {
+  const ids = await tagIDsOf([name]);
+  if (!ids.length) return [];
   const rows = await query(
     "SELECT it.itemID AS itemID, it.type AS type FROM itemTags it " +
-      "JOIN tags t USING (tagID) JOIN items i USING (itemID) " +
-      "WHERE t.name=? AND i.libraryID=? ORDER BY it.itemID",
-    [name, libraryID],
+      "JOIN items i USING (itemID) " +
+      `WHERE it.tagID IN (${placeholders(ids.length)}) AND i.libraryID=? ` +
+      "ORDER BY it.itemID",
+    [...ids, libraryID],
   );
-  return rows.map((r) => ({ id: r.itemID as number, type: r.type ? 1 : 0 }));
+  const types = new Map<number, TagType>();
+  for (const r of rows) {
+    const id = r.itemID as number;
+    const type: TagType = r.type ? 1 : 0;
+    types.set(id, Math.min(types.get(id) ?? type, type) as TagType);
+  }
+  return [...types].map(([id, type]) => ({ id, type }));
 }
 
 /** Snapshot of the given tag names: membership, types and colors. */
@@ -168,23 +213,27 @@ export async function loadTags(
       [scope.collectionID],
     );
     for (const r of rows) {
-      scopeCounts.set(
-        `${(r.name as string).normalize()}\u0000${r.type ? 1 : 0}`,
-        r.n as number,
-      );
+      const key = `${cleanName(r.name as string)}\u0000${r.type ? 1 : 0}`;
+      scopeCounts.set(key, (scopeCounts.get(key) ?? 0) + (r.n as number));
     }
   }
 
-  const tags: TagRef[] = [];
+  // Names as Zotero shows them (cleaned): tags stored in two forms of one
+  // name (see tagIDsOf) become one entry per type.
+  const byKey = new Map<string, TagRef>();
   for (const r of totalRows) {
-    const name = (r.name as string).normalize();
+    const name = cleanName(r.name as string);
     const type: TagType = r.type ? 1 : 0;
-    const scopeCount = scope
-      ? (scopeCounts.get(`${name}\u0000${type}`) ?? 0)
-      : undefined;
+    const key = `${name}\u0000${type}`;
+    const scopeCount = scope ? (scopeCounts.get(key) ?? 0) : undefined;
     if (scope && !scopeCount) continue;
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.itemCount += r.n as number;
+      continue;
+    }
     const color = colorByName.get(name);
-    tags.push({
+    byKey.set(key, {
       name,
       type,
       itemCount: r.n as number,
@@ -193,7 +242,7 @@ export async function loadTags(
       position: color?.position,
     });
   }
-  return tags.sort(
+  return [...byKey.values()].sort(
     (a, b) =>
       a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) ||
       a.type - b.type,
@@ -209,12 +258,13 @@ export async function measureImpact(
   names: readonly string[],
   scope?: Scope,
 ): Promise<{ total: number; outsideScope: number }> {
+  const tagIDs = await tagIDsOf(names);
   const all = new Set<number>();
-  for (const part of chunks(names, CHUNK)) {
+  for (const part of chunks(tagIDs, CHUNK)) {
     const rows = await query(
       "SELECT DISTINCT it.itemID AS itemID FROM itemTags it " +
-        "JOIN tags t USING (tagID) JOIN items i USING (itemID) " +
-        `WHERE i.libraryID=? AND t.name IN (${placeholders(part.length)})`,
+        "JOIN items i USING (itemID) " +
+        `WHERE i.libraryID=? AND it.tagID IN (${placeholders(part.length)})`,
       [libraryID, ...part],
     );
     for (const r of rows) all.add(r.itemID as number);

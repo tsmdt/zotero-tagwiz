@@ -51,6 +51,46 @@ describe("duplicates", function () {
         duplicateKey("cafe", "normalized"),
       );
     });
+
+    it("folds accents on Latin and Greek letters", function () {
+      for (const [a, b] of [
+        ["résumé", "resume"],
+        ["Ångström", "angstrom"],
+        ["Ελλάδα", "ελλαδα"],
+        ["ﬁlm", "film"],
+      ]) {
+        assert.equal(
+          duplicateKey(a, "normalized"),
+          duplicateKey(b, "normalized"),
+          `${a} / ${b}`,
+        );
+      }
+    });
+
+    it("keeps marks that tell letters apart in other scripts", function () {
+      for (const [a, b] of [
+        ["がき", "かき"], // Japanese dakuten
+        ["किताब", "कताब"], // Devanagari vowel sign
+        ["мой", "мои"], // Cyrillic short i
+      ]) {
+        assert.notEqual(
+          duplicateKey(a, "normalized"),
+          duplicateKey(b, "normalized"),
+          `${a} / ${b}`,
+        );
+      }
+      assert.lengthOf(
+        findDuplicateGroups([t("がき"), t("かき")], "normalized"),
+        0,
+      );
+    });
+
+    it("still matches composed and decomposed forms of other scripts", function () {
+      assert.equal(
+        duplicateKey("が", "normalized"),
+        duplicateKey("が", "normalized"),
+      );
+    });
   });
 
   describe("findDuplicateGroups", function () {
@@ -101,6 +141,16 @@ describe("duplicates", function () {
       assert.equal(pick.type, 0);
     });
 
+    it("counts both types of a name together", function () {
+      const pick = pickCanonical([
+        t("foo", 5),
+        t("foo", 5, { type: 1 }),
+        t("Foo", 6),
+      ]);
+      assert.equal(pick.name, "foo");
+      assert.equal(pick.type, 0);
+    });
+
     it("may still pick an automatic tag when its name has no manual variant", function () {
       const pick = pickCanonical([t("ML", 9, { type: 1 }), t("ml", 2)]);
       assert.equal(pick.name, "ML");
@@ -131,6 +181,34 @@ describe("duplicates", function () {
         .map((p) => `${p.a.name}~${p.b.name}:${p.reason}`)
         .sort();
       assert.deepEqual(labels, ["algorithm~algorithms:plural"]);
+    });
+
+    it("lists a pair once when a name has both types", function () {
+      const pairs = findFuzzyPairs([
+        t("neuron"),
+        t("neuron", 1, { type: 1 }),
+        t("neurons"),
+      ]);
+      assert.lengthOf(pairs, 1);
+      assert.equal(pairs[0].reason, "plural");
+    });
+
+    it("finds substitutions, insertions and deletions, not other first letters", function () {
+      const pairs = findFuzzyPairs([
+        t("colour"),
+        t("colout"), // substitution
+        t("colur"), // deletion
+        t("kolour"), // other first letter
+        t("bayes rule", 9),
+        t("bayes rules", 9),
+      ]);
+      const labels = pairs.map((p) => [p.a.name, p.b.name].sort().join("~"));
+      assert.deepEqual(labels.slice(1).sort(), [
+        "colour~colout",
+        "colour~colur",
+      ]);
+      // Most-used first.
+      assert.equal(labels[0], "bayes rule~bayes rules");
     });
   });
 });

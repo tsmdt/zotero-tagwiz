@@ -38,8 +38,10 @@ Pick a tab, select tags (the filter box helps with long lists), check the previe
 
 Choose a style: lower case, UPPER CASE, Title Case, Sentence case, camelCase, PascalCase, snake_case or kebab-case. For example, `machine learning` becomes `Machine Learning` in Title Case and `machine_learning` in snake_case. Two options refine the result:
 
-- **Keep ALL-CAPS words**: words like `NLP` stay as they are in every style. `NLP methods` becomes `NLP Methods` in Title Case instead of `Nlp Methods`, and `LLM Framework Studies` becomes `LLMframeworkStudies` in camelCase.
+- **Keep ALL-CAPS and mixed-case words**: words like `NLP` or `iPhone` stay as they are in every style except UPPER CASE. `NLP methods` becomes `NLP Methods` in Title Case instead of `Nlp Methods`, `iPhone apps` becomes `iPhone Apps` instead of `Iphone Apps`, and `LLM Framework Studies` becomes `LLMframeworkStudies` in camelCase.
 - **Keep prefix**: type a prefix such as `TECH: `, `00_` or `Aa-`. In tags that start with exactly this text (case-sensitive, spaces count), the prefix stays as typed and only the rest changes: `TECH: 2026 deep learning` becomes `TECH: 2026DeepLearning` in camelCase. Leave it empty to convert whole tags.
+
+snake_case, kebab-case, camelCase and PascalCase split words at spaces, "-" and "\_" only, so other characters are kept: `C++ programming` becomes `c++_programming`, not `c_programming`.
 
 If two tags end up with the same name, the preview marks them as a merge.
 
@@ -49,7 +51,7 @@ Select one tag to rename it, or two or more to merge them, then type or pick the
 
 ### Remove
 
-Select tags and apply to delete them from every item. Tags that have a color lose it, and the preview says so.
+Select tags and apply to delete them from every item. Tags that have a color lose it, and the preview says so. Tags selected on another tab are not carried over to this one, and the confirmation lists the tags it removes.
 
 ### Duplicates
 
@@ -57,21 +59,21 @@ Choose how strict the match is:
 
 - **Same name, different type**: the same text used as both a manual and an automatic tag.
 - **Ignoring case**: `Machine Learning` and `machine learning`.
-- **Ignoring case, spaces, "-" and "\_"**: also treats `machine-learning`, `machine_learning` and `machineLearning` as the same.
+- **Ignoring case, accents, spaces, "-" and "\_"**: also treats `machine-learning`, `machine_learning` and `machineLearning` as the same, and `café` as `cafe`. Only accents on Latin and Greek letters are ignored; in other scripts such marks tell letters apart (Japanese `が` and `か` stay different).
 
-Each group suggests a spelling to keep; pick another one with the radio buttons, or untick the group to skip it. Below the groups, **Possible typos and plurals** lists near-matches, which are never merged automatically. **Merge…** sends a pair to the Rename & Merge tab so you can decide.
+Each group suggests a spelling to keep (the most used one); pick another one with the radio buttons, or untick the group to skip it. If the name you keep is used both as a manual and an automatic tag, the merged tags become manual. Below the groups, **Possible typos and plurals** lists near-matches, which are never merged automatically. **Merge…** sends a pair to the Rename & Merge tab so you can decide.
 
 ### Undo
 
 Before the first change of every run, TagWiz saves a snapshot of the affected tags in a `tagwiz` folder inside your Zotero data directory. **Undo Latest Edit** restores the tags from the most recent run, including which items carry them, their manual or automatic type and their colors.
 
-Keep in mind that **only the latest run can be undone**, and each run only once. If the tags were changed again afterwards (for example by a sync), TagWiz lists them and asks before overwriting.
+Keep in mind that **only the latest run can be undone**, and each run only once. If the tags were changed again afterwards (for example by a sync), TagWiz lists them and asks before overwriting; restoring anyway cannot itself be undone. TagWiz keeps the snapshots of the last 10 runs of each library.
 
 Manual and automatic tags keep their type, and tag colors move with the tag. Changes sync like any other edit, so wait for a running sync to finish before editing tags, and keep a backup of your Zotero data before the first big run.
 
 ## Compatibility
 
-TagWiz was developed and tested on **Zotero 10.0.6**. Earlier versions have not been tested.
+TagWiz was developed and tested on **Zotero 10.0.6**.
 
 ## Development
 

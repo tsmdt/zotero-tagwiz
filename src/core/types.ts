@@ -25,7 +25,10 @@ export type CaseStyle =
 
 export interface CaseOptions {
   style: CaseStyle;
-  /** Keep all-caps words of 2+ letters (e.g. "NLP") in every style. Default true. */
+  /**
+   * Keep all-caps words of 2+ letters ("NLP") and mixed-case words ("iPhone")
+   * unchanged in every style but upper case. Default true.
+   */
   keepAcronyms?: boolean;
   /** Tags starting with this exact prefix (e.g. "TECH: ") keep it unchanged. Default "" (off). */
   prefix?: string;
