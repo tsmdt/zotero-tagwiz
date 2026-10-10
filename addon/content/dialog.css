@@ -136,7 +136,7 @@ body {
   border-radius: 0 6px 6px 6px;
 }
 
-.tw-options > * {
+.tw-options>* {
   flex: none;
 }
 
@@ -154,8 +154,8 @@ body {
   width: 18em;
 }
 
-.tw-options > .tw-hint,
-.tw-options > label.tw-field {
+.tw-options>.tw-hint,
+.tw-options>label.tw-field {
   flex: 0 1 auto;
   min-width: 0;
 }
@@ -403,11 +403,11 @@ button:not(.tw-tab, .tw-sort-button):disabled {
 }
 
 .tw-tag-table th.tw-tag-type {
-  width: 5.5em;
+  width: 3.5em;
 }
 
 .tw-tag-table th.tw-count {
-  width: 4.5em;
+  width: 6em;
 }
 
 .tw-tag-table td.tw-tag-type,

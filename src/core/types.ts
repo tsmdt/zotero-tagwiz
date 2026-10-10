@@ -25,7 +25,7 @@ export type CaseStyle =
 
 export interface CaseOptions {
   style: CaseStyle;
-  /** Title/sentence case: keep all-caps words of 2+ letters (e.g. "NLP"). Default true. */
+  /** Keep all-caps words of 2+ letters (e.g. "NLP") in every style. Default true. */
   keepAcronyms?: boolean;
   /** Leave everything up to the last ":" or "/" unchanged (e.g. "topic:Foo"). Default false. */
   preservePrefix?: boolean;

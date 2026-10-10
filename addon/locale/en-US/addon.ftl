@@ -7,7 +7,7 @@ dialog-no-library = Select a library or collection first.
 scope-collection = Tags used in “{ $collection }”
 scope-library = Showing all tags in “{ $library }”
 include-subcollections = Include subcollections
-edits-library-wide = Changes always apply to the whole library.
+edits-library-wide = Changes always apply to your whole library.
 
 tab-case = Change Case
 tab-unify = Rename & Merge
@@ -34,7 +34,7 @@ case-camel = camelCase
 case-pascal = PascalCase
 case-snake = snake_case
 case-kebab = kebab-case
-case-keep-acronyms = Keep ALL-CAPS words (Title/Sentence case)
+case-keep-acronyms = Keep ALL-CAPS words
 case-preserve-prefix = Keep the part before “:” or “/”
 
 unify-target = New name
