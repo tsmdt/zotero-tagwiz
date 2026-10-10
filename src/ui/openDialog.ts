@@ -1,16 +1,20 @@
 import { config } from "../../package.json";
 import { getString } from "../utils/locale";
 import { isWindowAlive } from "../utils/window";
-import { TagWizDialog } from "./dialog";
+import { DialogParams, TagWizDialog } from "./dialog";
 
 const DIALOG_URL = `chrome://${config.addonRef}/content/dialog.xhtml`;
 
 const LOAD_TIMEOUT = 10000;
 const LOAD_POLL = 20;
 
+/** The dialog shown in addon.data.dialog, once it has loaded. */
+let current: TagWizDialog | undefined;
+
 /**
  * Open the TagWiz window for the library/collection currently selected
- * in the main window. A second call focuses the existing window.
+ * in the main window. A second call focuses the existing window and switches
+ * it to the current selection (unless a run is going on there).
  * Never rejects: menu handlers call it fire-and-forget, so errors are logged.
  */
 export async function openTagWiz(): Promise<void> {
@@ -21,16 +25,30 @@ export async function openTagWiz(): Promise<void> {
   }
 }
 
+/** The library/collection selected in the main window, if any. */
+function selection(): DialogParams | undefined {
+  const pane = Zotero.getActiveZoteroPane();
+  const libraryID = pane?.getSelectedLibraryID();
+  if (!libraryID) return undefined;
+  const collection = pane.getSelectedCollection();
+  return {
+    libraryID,
+    collection: collection
+      ? { id: collection.id, name: collection.name }
+      : undefined,
+  };
+}
+
 async function open(): Promise<void> {
+  const params = selection();
   const existing = addon.data.dialog;
   if (existing && isWindowAlive(existing)) {
     existing.focus();
+    if (params) await current?.setScope(params);
     return;
   }
 
-  const pane = Zotero.getActiveZoteroPane();
-  const libraryID = pane?.getSelectedLibraryID();
-  if (!libraryID) {
+  if (!params) {
     Services.prompt.alert(
       Zotero.getMainWindow() as any,
       getString("dialog-title"),
@@ -38,8 +56,8 @@ async function open(): Promise<void> {
     );
     return;
   }
-  const collection = pane.getSelectedCollection();
 
+  current = undefined;
   const win = Services.ww.openWindow(
     Zotero.getMainWindow() as any,
     DIALOG_URL,
@@ -51,12 +69,9 @@ async function open(): Promise<void> {
 
   await waitForRoot(win);
 
-  await new TagWizDialog(win, {
-    libraryID,
-    collection: collection
-      ? { id: collection.id, name: collection.name }
-      : undefined,
-  }).init();
+  const dialog = new TagWizDialog(win, params);
+  current = dialog;
+  await dialog.init();
 }
 
 /**

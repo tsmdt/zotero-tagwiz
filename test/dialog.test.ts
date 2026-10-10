@@ -269,6 +269,184 @@ describe("dialog (in Zotero)", function () {
     assert.isTrue(cancel.disabled);
   });
 
+  it("switching to Remove drops tags selected on another tab", async function () {
+    const [a, b] = [name("ra"), name("rb")];
+    await makeItem([a, b]);
+    const { dialog } = await openDialog();
+    dialog.filter = prefix;
+    dialog.renderAll();
+    dialog.selected = new Set([a, b]);
+    dialog.switchTab("unify");
+    assert.equal(dialog.selected.size, 2, "kept between non-destructive tabs");
+
+    dialog.switchTab("remove");
+
+    assert.equal(dialog.selected.size, 0);
+    assert.lengthOf(dialog.plan.rows, 0);
+  });
+
+  it("counts selected tags the filter hides", async function () {
+    const [a, b] = [name("ha"), name("hb")];
+    await makeItem([a, b]);
+    const { win, dialog } = await openDialog();
+    dialog.filter = prefix;
+    dialog.renderAll();
+    win.document.querySelector<HTMLButtonElement>(".tw-select-all")!.click();
+    // Fluent may wrap arguments in bidi isolation marks.
+    const count = () =>
+      win.document
+        .querySelector(".tw-pane-header .tw-hint")!
+        .textContent!.replace(/[\u2068\u2069]/g, "");
+    assert.notInclude(count(), "not shown");
+
+    dialog.filter = a;
+    dialog.renderAll();
+
+    assert.deepEqual([...dialog.selected].sort(), [a, b]);
+    assert.include(count(), "1 not shown");
+  });
+
+  it("the Remove confirmation says it removes and names the tags", async function () {
+    const tag = name("rc");
+    await makeItem([tag]);
+    const { dialog } = await openDialog();
+    dialog.switchTab("remove");
+    dialog.selected = new Set([tag]);
+    dialog.refreshPlan();
+    let asked: { title: string; text: string } | undefined;
+    dialog.confirm = (title: string, text: string) => {
+      asked = { title, text };
+      return false;
+    };
+
+    await dialog.apply();
+
+    assert.include(asked?.title ?? "", "Remove");
+    assert.include(asked?.text ?? "", tag);
+    assert.deepEqual(await typesOf(libraryID, tag), [0], "nothing removed");
+  });
+
+  /** Text without Fluent's bidi isolation marks. */
+  const plain = (text: string) => text.replace(/[\u2068\u2069]/g, "");
+
+  /** Wait until `check` holds, or fail after `ms`. */
+  async function until(check: () => boolean, ms = 5000) {
+    for (let waited = 0; !check(); waited += 50) {
+      if (waited > ms) throw new Error("timed out");
+      await Zotero.Promise.delay(50);
+    }
+  }
+
+  it("switches an open window to another collection", async function () {
+    const [inside, outside] = [name("in"), name("out")];
+    const collection = new Zotero.Collection({
+      libraryID,
+      name: name("col"),
+    });
+    await collection.saveTx();
+    try {
+      const item = await makeItem([inside]);
+      item.setCollections([collection.id]);
+      await item.saveTx();
+      await makeItem([outside]);
+      const { win, dialog } = await openDialog();
+      const listed = () =>
+        dialog.rows
+          .map((r: { name: string }) => r.name)
+          .filter((n: string) => n.startsWith(prefix));
+      assert.includeMembers(listed(), [inside, outside]);
+
+      const switched = await dialog.setScope({
+        libraryID,
+        collection: { id: collection.id, name: collection.name },
+      });
+
+      assert.isTrue(switched);
+      assert.deepEqual(listed(), [inside]);
+      assert.include(
+        plain(win.document.querySelector(".tw-header")!.textContent!),
+        collection.name,
+      );
+    } finally {
+      await collection.eraseTx();
+    }
+  });
+
+  it("reloads when tags change elsewhere in Zotero", async function () {
+    const { dialog } = await openDialog();
+    const tag = name("ext");
+    const has = () => dialog.rows.some((r: { name: string }) => r.name === tag);
+    assert.isFalse(has());
+
+    await makeItem([tag]);
+
+    await until(has);
+  });
+
+  it("does not apply a plan that changed since it was shown", async function () {
+    const [from, to] = [name("sf"), name("st")];
+    await makeItem([from]);
+    const { dialog } = await openDialog();
+    dialog.switchTab("unify");
+    dialog.selected = new Set([from]);
+    dialog.unifyTarget = to;
+    dialog.targetTouched = true;
+    dialog.refreshPlan();
+    assert.isFalse(dialog.plan.rows[0].merges, "a plain rename so far");
+    let confirms = 0;
+    dialog.confirm = () => {
+      confirms++;
+      return true;
+    };
+
+    // The target appears elsewhere: the rename would now merge into it.
+    await makeItem([to]);
+    await dialog.apply();
+
+    assert.equal(confirms, 0);
+    assert.equal(dialog.status.kind, "error");
+    assert.deepEqual(await typesOf(libraryID, from), [0], "nothing applied");
+    assert.isTrue(dialog.selected.has(from), "the selection is kept");
+    assert.isTrue(dialog.plan.rows[0].merges, "the preview shows the merge");
+  });
+
+  it("locks everything but the footer during a run, and counts tags", async function () {
+    const tag = name("lk");
+    await makeItem([tag]);
+    await makeItem([{ tag, type: 1 }]);
+    const { dialog } = await openDialog();
+    dialog.selected = new Set([tag]);
+    dialog.caseOpts = { ...dialog.caseOpts, style: "upper" };
+    dialog.refreshPlan();
+    assert.lengthOf(dialog.plan.rows, 2, "manual and automatic rows");
+    let seen: { inert: boolean; text: string } | undefined;
+    dialog.confirm = (_title: string, text: string) => {
+      seen = { inert: dialog.mainEl.hasAttribute("inert"), text: plain(text) };
+      return true;
+    };
+
+    await dialog.apply();
+
+    assert.isTrue(seen?.inert);
+    assert.include(seen?.text ?? "", "Apply 1 change to 2 items");
+    assert.isFalse(dialog.mainEl.hasAttribute("inert"));
+    assert.isFalse(dialog.menuEl.hasAttribute("inert"));
+  });
+
+  it("offers one survivor per name in a duplicate group", async function () {
+    const lower = name("dupe");
+    const upper = lower.toUpperCase();
+    await makeItem([lower, upper]);
+    await makeItem([{ tag: lower, type: 1 }]);
+    const { win, dialog } = await openDialog();
+    dialog.switchTab("duplicates");
+    const group = [
+      ...win.document.querySelectorAll(".tw-duplicate-group"),
+    ].find((g) => g.textContent!.includes(lower))!;
+    assert.exists(group);
+    assert.lengthOf(group.querySelectorAll('input[type="radio"]'), 2);
+  });
+
   it("the count column is labelled with the library's name", async function () {
     const { win } = await openDialog();
     const label = win.document.querySelector(

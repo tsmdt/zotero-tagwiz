@@ -300,6 +300,11 @@ button:not(.tw-tab, .tw-sort-button):disabled {
   cursor: default;
 }
 
+/* Parts locked during a run (see TagWizDialog.setBusy). */
+[inert] {
+  opacity: 0.6;
+}
+
 /* ---------------------------------------------------------------------------
  * Tables: shared look of the tag list, the preview and the fuzzy-match list.
  * Each table sits in a bordered .tw-scroll-box that scrolls on its own.

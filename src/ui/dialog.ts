@@ -13,6 +13,7 @@ import {
   buildUnifyPlan,
   includedOps,
 } from "../core/plan";
+import { toTasks } from "../core/tasks";
 import type {
   CaseOptions,
   CaseStyle,
@@ -23,7 +24,7 @@ import type {
 } from "../core/types";
 import { applyOps, undoJournal } from "../zotero/engine";
 import { preflight } from "../zotero/guard";
-import { latestUndoable } from "../zotero/journal";
+import { findUndoable, latestUndoable } from "../zotero/journal";
 import { loadTags, measureImpact, type Scope } from "../zotero/tagStore";
 import { FluentMessageId } from "../../typings/i10n";
 import { getString } from "../utils/locale";
@@ -122,6 +123,10 @@ const MAX_FUZZY = 100;
 /** Rows rendered at most in the tag list and the preview (all still apply). */
 const MAX_ROWS = 1000;
 const FILTER_DELAY = 150;
+/** Wait for changes made elsewhere in Zotero to settle before reloading. */
+const RELOAD_DELAY = 500;
+/** Tag names listed by name in the Remove confirmation, at most. */
+const MAX_CONFIRM_NAMES = 10;
 const IMPACT_DELAY = 250;
 const CASE_STYLES: Array<[CaseStyle, FluentMessageId]> = [
   ["lower", "case-lower"],
@@ -156,8 +161,8 @@ function opKey(op: Op): string {
 export class TagWizDialog {
   private readonly doc: Document;
   private readonly root: HTMLElement;
-  private readonly libraryID: number;
-  private readonly collection?: { id: number; name: string };
+  private libraryID: number;
+  private collection?: { id: number; name: string };
 
   private tab: TabID = "case";
   private includeSub = true;
@@ -168,6 +173,8 @@ export class TagWizDialog {
   private allTags: TagRef[] = [];
   private rows: NameRow[] = [];
   private selected = new Set<string>();
+  /** Names currently rendered in the tag list (filter and MAX_ROWS applied). */
+  private shownNames = new Set<string>();
   private excluded = new Set<string>();
 
   private caseOpts: CaseOptions = {
@@ -181,7 +188,9 @@ export class TagWizDialog {
 
   private dupTier: DuplicateTier = "case";
   private groups: DuplicateGroup[] = [];
-  private groupOn = new Set<string>();
+  /** Groups the user unticked; the others are merged. Kept across reloads. */
+  private groupOff = new Set<string>();
+  /** Survivor the user picked per group. Kept across reloads. */
   private chosen = new Map<string, TagRef>();
   /** Fuzzy pairs of the listed tags; computed on demand, reset by reload. */
   private fuzzy?: FuzzyPair[];
@@ -199,8 +208,12 @@ export class TagWizDialog {
   private impactSeq = 0;
   private impactTimer?: number;
   private filterTimer?: number;
+  private reloadTimer?: number;
   private canUndo = false;
 
+  private headerEl!: HTMLElement;
+  private menuEl!: HTMLElement;
+  private mainEl!: HTMLElement;
   private leftEl!: HTMLElement;
   private controlsEl!: HTMLElement;
   private previewEl!: HTMLElement;
@@ -239,12 +252,8 @@ export class TagWizDialog {
 
   async init() {
     this.doc.title = getString("dialog-title");
-    const library = Zotero.Libraries.get(this.libraryID);
-    if (!library) {
-      this.setStatus(getString("error-no-library"), "error");
-    } else if (!library.editable) {
-      this.setStatus(getString("error-read-only"), "error");
-    }
+    this.checkLibrary();
+    this.observeChanges();
     // Closing mid-run would abandon the run with no UI: stop at the next task
     // boundary instead, then close.
     this.win.addEventListener("close", (e: Event) => {
@@ -258,9 +267,89 @@ export class TagWizDialog {
     await this.reload();
   }
 
+  private checkLibrary() {
+    const library = Zotero.Libraries.get(this.libraryID);
+    if (!library) {
+      this.setStatus(getString("error-no-library"), "error");
+    } else if (!library.editable) {
+      this.setStatus(getString("error-read-only"), "error");
+    }
+  }
+
+  /**
+   * Show another library or collection: TagWiz was opened again from there
+   * while this window was open. Refused (false) during a run.
+   */
+  async setScope(params: DialogParams): Promise<boolean> {
+    if (this.busy) return false;
+    if (
+      params.libraryID === this.libraryID &&
+      params.collection?.id === this.collection?.id
+    ) {
+      return true;
+    }
+    this.libraryID = params.libraryID;
+    this.collection = params.collection;
+    this.selected.clear();
+    this.excluded.clear();
+    this.groupOff.clear();
+    this.chosen.clear();
+    this.unifyTarget = "";
+    this.targetTouched = false;
+    this.filter = "";
+    // The collection column comes and goes.
+    this.columnWidths = {};
+    this.status = { text: "", kind: "info" };
+    this.checkLibrary();
+    this.buildSkeleton();
+    await this.reload();
+    return true;
+  }
+
+  /**
+   * Reload when tags change elsewhere in Zotero (main window, sync, other
+   * plugins), so the list and the merge warnings are not stale. Changes
+   * during a run are ours; the run reloads when it ends.
+   */
+  private observeChanges() {
+    const id = Zotero.Notifier.registerObserver(
+      {
+        notify: (
+          _event: string,
+          type: string,
+          ids: Array<string | number>,
+          extraData: Record<string, any>,
+        ) => {
+          if (this.busy || !this.alive) return;
+          const otherLibrary =
+            type === "item-tag" &&
+            ids.every((x) => {
+              const lib = extraData?.[x]?.libraryID;
+              return lib !== undefined && lib !== this.libraryID;
+            });
+          // Synced settings ("<libraryID>/<name>") also hold e.g. the
+          // reader's last page; only this library's tag colors matter here.
+          const otherSetting =
+            type === "setting" && !ids.includes(`${this.libraryID}/tagColors`);
+          if (otherLibrary || otherSetting) return;
+          this.win.clearTimeout(this.reloadTimer);
+          this.reloadTimer = this.win.setTimeout(
+            () => void this.reload(),
+            RELOAD_DELAY,
+          );
+        },
+      },
+      ["item-tag", "tag", "setting"],
+      "tagwiz",
+    );
+    this.win.addEventListener("unload", () =>
+      Zotero.Notifier.unregisterObserver(id),
+    );
+  }
+
   /** Re-read tags from the database and redraw everything. */
   private async reload() {
-    if (!this.alive) return;
+    if (!this.alive || this.busy) return;
     try {
       await this.loadData();
     } catch (e) {
@@ -271,7 +360,21 @@ export class TagWizDialog {
       );
       return;
     }
-    if (this.alive) this.renderAll();
+    if (!this.alive) return;
+    // Redrawing replaces the inputs: keep the caret where the user types.
+    const active = this.doc.activeElement as HTMLInputElement | null;
+    const focusID = active?.id;
+    const caret = focusID ? active.selectionStart : null;
+    this.renderAll();
+    const again = focusID
+      ? (this.doc.getElementById(focusID) as HTMLInputElement | null)
+      : null;
+    if (again) {
+      again.focus();
+      if (typeof caret === "number" && "setSelectionRange" in again) {
+        again.setSelectionRange(caret, caret);
+      }
+    }
   }
 
   private async loadData() {
@@ -324,10 +427,9 @@ export class TagWizDialog {
     return this.rows.flatMap((r) => r.refs);
   }
 
+  /** User choices (groupOff, chosen) stay valid: they are keyed by members. */
   private recomputeGroups() {
     this.groups = findDuplicateGroups(this.listedRefs(), this.dupTier);
-    this.groupOn = new Set(this.groups.map(groupKey));
-    this.chosen = new Map();
   }
 
   // ------------------------------------------------------------- plan
@@ -349,11 +451,16 @@ export class TagWizDialog {
         plan = buildRemovePlan(refs, this.allTags);
         break;
       case "duplicates": {
-        const active = this.groups.filter((g) => this.groupOn.has(groupKey(g)));
+        const active = this.groups.filter(
+          (g) => !this.groupOff.has(groupKey(g)),
+        );
         const chosen = new Map<DuplicateGroup, TagRef>();
         for (const g of active) {
           const pick = this.chosen.get(groupKey(g));
-          if (pick) chosen.set(g, pick);
+          // The current member: a reload replaces the TagRef objects.
+          const member =
+            pick && g.members.find((m) => refKey(m) === refKey(pick));
+          if (member) chosen.set(g, member);
         }
         plan = buildDuplicatePlan(active, this.allTags, chosen);
         break;
@@ -390,6 +497,8 @@ export class TagWizDialog {
   }
 
   private refreshPlan() {
+    // A run applies the plan it started with; don't show another meanwhile.
+    if (this.busy) return;
     this.plan = this.computePlan();
     this.renderPreview();
     this.renderFooter();
@@ -422,7 +531,16 @@ export class TagWizDialog {
           ),
         ),
       ];
-      const impact = await measureImpact(this.libraryID, names, this.scope);
+      let impact: { total: number; outsideScope: number };
+      try {
+        impact = await measureImpact(this.libraryID, names, this.scope);
+      } catch (e) {
+        Zotero.logError(e as Error);
+        if (seq !== this.impactSeq) return;
+        this.impactText = "";
+        if (this.alive) this.renderFooter();
+        return;
+      }
       if (seq !== this.impactSeq) return; // a newer plan superseded this one
       this.impactText = this.scope
         ? getString("impact", {
@@ -440,6 +558,7 @@ export class TagWizDialog {
     clear(this.root);
 
     const header = h(doc, "div", { class: "tw-header" });
+    this.headerEl = header;
     if (this.collection) {
       const sub = h(doc, "input", {
         type: "checkbox",
@@ -502,6 +621,7 @@ export class TagWizDialog {
 
     this.controlsEl = h(doc, "div", { class: "tw-options" });
     const menu = h(doc, "div", { class: "tw-menu" }, tabs, this.controlsEl);
+    this.menuEl = menu;
 
     this.leftEl = h(doc, "div", { class: "tw-pane" });
     this.previewEl = h(doc, "div", { class: "tw-pane" });
@@ -512,6 +632,7 @@ export class TagWizDialog {
       this.leftEl,
       this.previewEl,
     );
+    this.mainEl = body;
     this.footerEl = h(doc, "div", { class: "tw-footer" });
 
     append(this.root, [header, menu, body, this.footerEl]);
@@ -532,6 +653,9 @@ export class TagWizDialog {
 
   private switchTab(id: TabID) {
     if (this.busy || id === this.tab) return;
+    // Removing is destructive: never carry over tags selected for another
+    // task, which may be hidden by the filter or beyond the shown rows.
+    if (id === "remove") this.selected.clear();
     this.tab = id;
     this.renderAll();
   }
@@ -570,7 +694,8 @@ export class TagWizDialog {
         type: "button",
         class: "tw-select-all",
         onclick: () => {
-          for (const r of this.visibleRows()) this.selected.add(r.name);
+          // Only what the user can see: not rows beyond MAX_ROWS.
+          for (const name of this.shownNames) this.selected.add(name);
           this.fillRows(tbody, updateCount, more);
           this.selectionChanged();
         },
@@ -592,9 +717,13 @@ export class TagWizDialog {
       getString("select-none"),
     );
     const updateCount = () => {
-      countEl.textContent = getString("selected-count", {
-        args: { count: this.selected.size },
-      });
+      const count = this.selected.size;
+      let hidden = 0;
+      for (const name of this.selected)
+        if (!this.shownNames.has(name)) hidden++;
+      countEl.textContent = hidden
+        ? getString("selected-count-hidden", { args: { count, hidden } })
+        : getString("selected-count", { args: { count } });
       selectNone.disabled = this.selected.size === 0;
     };
     updateCount();
@@ -784,6 +913,7 @@ export class TagWizDialog {
     clear(tbody);
     const all = this.visibleRows();
     const rows = all.slice(0, MAX_ROWS);
+    this.shownNames = new Set(rows.map((r) => r.name));
     more.hidden = all.length <= MAX_ROWS;
     more.textContent = getString("tag-list-more", {
       args: { shown: MAX_ROWS, total: all.length },
@@ -984,6 +1114,8 @@ export class TagWizDialog {
         id: "tw-tier",
         onchange: (e: Event) => {
           this.dupTier = (e.target as HTMLSelectElement).value as DuplicateTier;
+          this.groupOff.clear();
+          this.chosen.clear();
           this.recomputeGroups();
           this.renderLeft();
           this.refreshPlan();
@@ -1025,11 +1157,10 @@ export class TagWizDialog {
       const canonical = this.chosen.get(key) ?? group.canonical;
       const on = h(doc, "input", {
         type: "checkbox",
-        checked: this.groupOn.has(key),
-        "aria-label": getString("dup-merge-group"),
+        checked: !this.groupOff.has(key),
         onchange: () => {
-          if (on.checked) this.groupOn.add(key);
-          else this.groupOn.delete(key);
+          if (on.checked) this.groupOff.delete(key);
+          else this.groupOff.add(key);
           this.refreshPlan();
         },
       });
@@ -1037,10 +1168,16 @@ export class TagWizDialog {
         doc,
         "div",
         { class: "tw-duplicate-group" },
-        h(doc, "h3", {}, on, getString("dup-merge-group")),
+        h(doc, "h3", {}, h(doc, "label", {}, on, getString("dup-merge-group"))),
       );
-      group.members.forEach((member, index) => {
-        const radioName = `tw-keep-${key}`;
+      // The survivor is a name: its manual and automatic uses stay together
+      // (buildDuplicatePlan keeps the manual one), so one choice per name.
+      const byName = new Map<string, TagRef[]>();
+      for (const member of group.members) {
+        byName.set(member.name, [...(byName.get(member.name) ?? []), member]);
+      }
+      for (const [name, refs] of byName) {
+        const items = refs.reduce((n, r) => n + r.itemCount, 0);
         box.appendChild(
           h(
             doc,
@@ -1048,17 +1185,16 @@ export class TagWizDialog {
             {},
             h(doc, "input", {
               type: "radio",
-              name: radioName,
-              checked:
-                member === canonical || refKey(member) === refKey(canonical),
-              "aria-label": `${getString("dup-keep")}: ${member.name}`,
+              name: `tw-keep-${key}`,
+              checked: name === canonical.name,
+              "aria-label": `${getString("dup-keep")}: ${name}`,
               onchange: () => {
-                this.chosen.set(key, member);
+                this.chosen.set(key, refs.find((r) => r.type === 0) ?? refs[0]);
                 this.refreshPlan();
               },
             }),
-            h(doc, "span", { class: "tw-tag-name" }, member.name),
-            member.type === 1
+            h(doc, "span", { class: "tw-tag-name" }, name),
+            refs.every((r) => r.type === 1)
               ? h(
                   doc,
                   "span",
@@ -1066,11 +1202,10 @@ export class TagWizDialog {
                   getString("flag-auto"),
                 )
               : null,
-            h(doc, "span", { class: "tw-hint" }, ` ${member.itemCount}`),
-            index === 0 ? null : null,
+            h(doc, "span", { class: "tw-hint" }, ` ${items}`),
           ),
         );
-      });
+      }
       scroll.appendChild(box);
     }
 
@@ -1194,6 +1329,7 @@ export class TagWizDialog {
         type: "checkbox",
         checked: row.included && !row.blocked,
         disabled: row.blocked,
+        "aria-label": opName(row.op),
         onchange: () => {
           if (box.checked) this.excluded.delete(row.key);
           else this.excluded.add(row.key);
@@ -1411,22 +1547,59 @@ export class TagWizDialog {
     return getString(ids[reason] ?? "error-no-library");
   }
 
+  /**
+   * During a run only the footer (status, Cancel) stays usable: the rest
+   * would change a plan that is no longer the one running.
+   */
+  private setBusy(busy: boolean) {
+    this.busy = busy;
+    for (const el of [this.headerEl, this.menuEl, this.mainEl]) {
+      el?.toggleAttribute("inert", busy);
+    }
+  }
+
+  /** What a plan would do, to tell whether reloaded data changes it. */
+  private planSignature(plan: ChangePlan): string {
+    return plan.rows
+      .map(
+        (r) =>
+          `${opKey(r.op)}|${r.included}|${r.merges}|${r.error ?? ""}|${r.warnings.join(",")}`,
+      )
+      .join("\n");
+  }
+
   private confirm(title: string, text: string): boolean {
     return (Services.prompt as any).confirm(this.win, title, text) as boolean;
   }
 
   private async apply() {
-    const ops = includedOps(this.plan);
-    if (!ops.length || this.busy) return;
+    if (!includedOps(this.plan).length || this.busy) return;
     // Set before the first await so a second click cannot start another run.
-    this.busy = true;
+    this.setBusy(true);
     let started = false;
+    /** Data changed since the preview was drawn: redraw instead of applying. */
+    let stale = false;
     try {
       const guard = preflight(this.libraryID);
       if (!guard.ok) {
         this.setStatus(this.guardMessage(guard.reason), "error");
         return;
       }
+      // Tags may have changed elsewhere since the preview was computed
+      // (e.g. a new tag this would now merge into): never apply anything
+      // other than what the user reviewed.
+      const shown = this.planSignature(this.plan);
+      await this.loadData();
+      const fresh = this.computePlan();
+      if (this.planSignature(fresh) !== shown) {
+        stale = true;
+        this.setStatus(getString("status-plan-changed"), "error");
+        return;
+      }
+      this.plan = fresh;
+      const ops = includedOps(this.plan);
+      // Throws for plans that cannot run as shown, before anything changes.
+      const tasks = toTasks(ops, this.allTags);
       const names = [
         ...new Set(
           ops.flatMap((op) =>
@@ -1435,22 +1608,27 @@ export class TagWizDialog {
         ),
       ];
       const impact = await measureImpact(this.libraryID, names, this.scope);
-      let text = getString("confirm-body", {
-        args: {
-          changes: ops.length,
-          items: impact.total,
-          outside: impact.outsideScope,
-        },
-      });
+      const removing = ops.every((op) => op.kind === "remove");
+      let text = removing
+        ? this.removeConfirmText(names, impact)
+        : getString("confirm-body", {
+            args: {
+              changes: tasks.length,
+              items: impact.total,
+              outside: impact.outsideScope,
+              scope: this.scope ? "collection" : "library",
+            },
+          });
       if (guard.warnings.includes("sync-in-progress"))
         text += `\n\n${getString("sync-warning")}`;
-      if (this.closeWhenDone || !this.confirm(getString("confirm-title"), text))
-        return;
+      const title = getString(
+        removing ? "confirm-remove-title" : "confirm-title",
+      );
+      if (this.closeWhenDone || !this.confirm(title, text)) return;
 
-      started = true;
       this.cancelRequested = false;
       this.setStatus(
-        getString("status-working", { args: { done: 0, total: ops.length } }),
+        getString("status-working", { args: { done: 0, total: tasks.length } }),
       );
       const result = await applyOps({
         libraryID: this.libraryID,
@@ -1462,31 +1640,65 @@ export class TagWizDialog {
             getString("status-working", { args: { done, total } }),
           ),
       });
+      // applyOps throws only before changing anything.
+      started = true;
       const args = {
         done: result.completedTasks,
         total: result.totalTasks,
         error: result.error ?? "",
       };
+      // Tags changed elsewhere since loading: say so rather than "Done".
+      const skipped = result.skippedTasks
+        ? ` ${getString("status-skipped", { args: { count: result.skippedTasks } })}`
+        : "";
       if (result.status === "done")
-        this.setStatus(getString("status-done", { args }));
+        this.setStatus(getString("status-done", { args }) + skipped);
       else if (result.status === "cancelled")
-        this.setStatus(getString("status-cancelled", { args }), "error");
-      else this.setStatus(getString("status-failed", { args }), "error");
+        this.setStatus(
+          getString("status-cancelled", { args }) + skipped,
+          "error",
+        );
+      else
+        this.setStatus(getString("status-failed", { args }) + skipped, "error");
     } catch (e) {
       this.setStatus(
         getString("status-error", { args: { error: errorText(e) } }),
         "error",
       );
     } finally {
-      this.busy = false;
+      this.setBusy(false);
       if (started) {
         this.selected.clear();
         this.excluded.clear();
         this.targetTouched = false;
         this.unifyTarget = "";
       }
-      await this.afterAction(started);
+      await this.afterAction(started || stale);
     }
+  }
+
+  /** Confirmation for a Remove run: says it deletes, and names the tags. */
+  private removeConfirmText(
+    names: string[],
+    impact: { total: number; outsideScope: number },
+  ): string {
+    const listed = names.slice(0, MAX_CONFIRM_NAMES).map((n) => `• ${n}`);
+    if (names.length > MAX_CONFIRM_NAMES) {
+      listed.push(
+        getString("confirm-remove-more", {
+          args: { count: names.length - MAX_CONFIRM_NAMES },
+        }),
+      );
+    }
+    return getString("confirm-remove-body", {
+      args: {
+        count: names.length,
+        items: impact.total,
+        outside: impact.outsideScope,
+        names: listed.join("\n"),
+        scope: this.scope ? "collection" : "library",
+      },
+    });
   }
 
   /** Re-render after apply/undo, or close if the user asked to meanwhile. */
@@ -1502,15 +1714,21 @@ export class TagWizDialog {
 
   private async undo() {
     if (this.busy) return;
-    this.busy = true;
+    this.setBusy(true);
     let started = false;
     try {
-      const journal = await latestUndoable(this.libraryID);
+      const { journal, unreadable } = await findUndoable(this.libraryID);
       if (!journal) {
         this.setStatus(getString("undo-none"));
         return;
       }
       let text = getString("undo-confirm");
+      // A newer snapshot may be this library's real latest run (e.g. one
+      // damaged by a crash): say which run would be undone instead.
+      if (unreadable.length)
+        text = `${getString("undo-unreadable-newer", {
+          args: { date: new Date(journal.createdAt).toLocaleString() },
+        })}\n\n${text}`;
       const guard = preflight(this.libraryID);
       if (guard.ok && guard.warnings.includes("sync-in-progress"))
         text += `\n\n${getString("sync-warning")}`;
@@ -1534,7 +1752,11 @@ export class TagWizDialog {
         );
       else
         this.setStatus(
-          getString("undo-unavailable", { args: { reason: result.reason } }),
+          getString(
+            result.reason === "already-undone"
+              ? "undo-already-undone"
+              : "undo-not-done",
+          ),
           "error",
         );
     } catch (e) {
@@ -1543,7 +1765,7 @@ export class TagWizDialog {
         "error",
       );
     } finally {
-      this.busy = false;
+      this.setBusy(false);
       await this.afterAction(started);
     }
   }

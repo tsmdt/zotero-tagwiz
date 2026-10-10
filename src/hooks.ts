@@ -5,6 +5,7 @@ import {
   unregisterMenus,
 } from "./modules/menus";
 import { initLocale } from "./utils/locale";
+import { isWindowAlive } from "./utils/window";
 
 async function onStartup() {
   await Promise.all([
@@ -44,10 +45,26 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 }
 
 function onShutdown(): void {
-  unregisterMenus();
-  unregisterLegacyMenus();
-  addon.data.dialog?.close();
-  ztoolkit.unregisterAll();
+  // Every step runs even if an earlier one throws: if the instance were not
+  // removed, the next startup (e.g. after an update) would reuse it and keep
+  // running the old code.
+  const steps = [
+    unregisterMenus,
+    () => unregisterLegacyMenus(),
+    () => {
+      const dialog = addon.data.dialog;
+      if (isWindowAlive(dialog)) dialog!.close();
+    },
+    () => ztoolkit.unregisterAll(),
+  ];
+  for (const step of steps) {
+    try {
+      step();
+    } catch (e) {
+      Zotero.logError(e as Error);
+    }
+  }
+  addon.data.dialog = undefined;
   // Remove addon object
   addon.data.alive = false;
   // @ts-expect-error - Plugin instance is not typed
