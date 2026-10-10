@@ -1,13 +1,13 @@
 # TagWiz 🏷️
 
-TagWiz is a [Zotero](https://www.zotero.org/) plugin for cleaning up tags in bulk: change their case, merge or remove several at once, and find and merge duplicates.
+TagWiz is a [Zotero](https://www.zotero.org/) plugin for cleaning up tags in bulk: change their case, rename or merge them, remove several at once, and find and merge duplicates.
 
 ## Table of contents
 
 - [Installation](#installation)
 - [Usage](#usage)
   - [Change Case](#change-case)
-  - [Merge](#merge)
+  - [Rename & Merge](#rename--merge)
   - [Remove](#remove)
   - [Duplicates](#duplicates)
   - [Undo](#undo)
@@ -39,9 +39,9 @@ Choose a style: lower case, UPPER CASE, Title Case, Sentence case, camelCase, Pa
 
 If two tags end up with the same name, the preview marks them as a merge.
 
-### Merge
+### Rename & Merge
 
-Select two or more tags and type or pick the name they should all become. The name can be one of the selected tags, another existing tag, or a new name.
+Select one tag to rename it, or two or more to merge them, then type or pick the new name. The name can be one of the selected tags, another existing tag, or a new name. Renaming a tag to the name of an existing tag merges the two.
 
 ### Remove
 
@@ -55,7 +55,7 @@ Choose how strict the match is:
 - **Ignoring case**: `Machine Learning` and `machine learning`.
 - **Ignoring case, spaces, "-" and "\_"**: also treats `machine-learning`, `machine_learning` and `machineLearning` as the same.
 
-Each group suggests a spelling to keep; pick another one with the radio buttons, or untick the group to skip it. Below the groups, **Possible typos and plurals** lists near-matches, which are never merged automatically. **Merge…** sends a pair to the Merge tab so you can decide.
+Each group suggests a spelling to keep; pick another one with the radio buttons, or untick the group to skip it. Below the groups, **Possible typos and plurals** lists near-matches, which are never merged automatically. **Merge…** sends a pair to the Rename & Merge tab so you can decide.
 
 ### Undo
 
