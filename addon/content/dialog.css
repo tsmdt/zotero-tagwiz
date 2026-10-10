@@ -30,7 +30,7 @@
   --tw-muted: color-mix(in srgb, CanvasText 60%, transparent);
   --tw-hover: color-mix(in srgb, CanvasText 7%, transparent);
   --tw-band: color-mix(in srgb, CanvasText 5%, Canvas);
-  --tw-row: 26px;
+  --tw-row: 30px;
   --tw-accent: AccentColor;
   --tw-warn: #b45309;
   --tw-error: #b91c1c;
