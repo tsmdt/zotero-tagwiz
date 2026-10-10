@@ -1,12 +1,41 @@
+/*
+ * TagWiz dialog styles. The markup is built by src/ui/dialog.ts.
+ *
+ * Layout of the window, top to bottom (each block has a section below):
+ *
+ *   ┌ #tagwiz-root ─────────────────────────────────────────────┐
+ *   │ .tw-header   scope ("All tags in …") + subcollections box │
+ *   │ .tw-tabs     Change Case | Unify | Remove | Duplicates    │
+ *   │ .tw-main ┌ left .tw-pane ──────┐ ┌ right .tw-pane ──────┐ │
+ *   │          │ .tw-toolbar         │ │ tab controls         │ │
+ *   │          │ tag list table      │ │ preview table        │ │
+ *   │          │ (or duplicate       │ │                      │ │
+ *   │          │  groups)            │ │                      │ │
+ *   │          └─────────────────────┘ └──────────────────────┘ │
+ *   │ .tw-hint     "Changes always apply to the whole library"  │
+ *   │ .tw-footer   impact + status | Undo | Close | Apply       │
+ *   └───────────────────────────────────────────────────────────┘
+ *
+ * Colors are system colors, so the dialog follows light and dark mode.
+ */
+
+/* ---------------------------------------------------------------------------
+ * Theme: shared colors
+ * ------------------------------------------------------------------------- */
+
 :root {
   color-scheme: light dark;
-  --tc-border: color-mix(in srgb, CanvasText 20%, transparent);
-  --tc-muted: color-mix(in srgb, CanvasText 60%, transparent);
-  --tc-hover: color-mix(in srgb, CanvasText 7%, transparent);
-  --tc-accent: AccentColor;
-  --tc-warn: #b45309;
-  --tc-error: #b91c1c;
+  --tw-border: color-mix(in srgb, CanvasText 20%, transparent);
+  --tw-muted: color-mix(in srgb, CanvasText 60%, transparent);
+  --tw-hover: color-mix(in srgb, CanvasText 7%, transparent);
+  --tw-accent: AccentColor;
+  --tw-warn: #b45309;
+  --tw-error: #b91c1c;
 }
+
+/* ---------------------------------------------------------------------------
+ * Window: page and the root column that stacks all blocks
+ * ------------------------------------------------------------------------- */
 
 html,
 body {
@@ -26,27 +55,29 @@ body {
   gap: 10px;
 }
 
-.tc-header {
+/* ---------------------------------------------------------------------------
+ * Header: which library or collection is shown, and the
+ * "Include subcollections" checkbox
+ * ------------------------------------------------------------------------- */
+
+.tw-header {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 4px 16px;
 }
-.tc-header h1 {
-  margin: 0;
-  font-size: 1.15em;
-}
-.tc-note {
-  color: var(--tc-muted);
-  font-size: 0.92em;
-}
 
-.tc-tabs {
+/* ---------------------------------------------------------------------------
+ * Tabs: Change Case, Unify, Remove, Duplicates
+ * ------------------------------------------------------------------------- */
+
+.tw-tabs {
   display: flex;
   gap: 2px;
-  border-bottom: 1px solid var(--tc-border);
+  border-bottom: 1px solid var(--tw-border);
 }
-.tc-tab {
+
+.tw-tab {
   appearance: none;
   border: 1px solid transparent;
   border-bottom: none;
@@ -57,28 +88,34 @@ body {
   padding: 6px 14px;
   cursor: pointer;
 }
-.tc-tab:hover {
-  background: var(--tc-hover);
+
+.tw-tab:hover {
+  background: var(--tw-hover);
 }
-.tc-tab[aria-selected="true"] {
-  border-color: var(--tc-border);
+
+/* The active tab merges into the content below it. */
+.tw-tab[aria-selected="true"] {
+  border-color: var(--tw-border);
   background: Canvas;
   font-weight: 600;
   margin-bottom: -1px;
   border-bottom: 1px solid Canvas;
 }
 
-.tc-body {
+/* ---------------------------------------------------------------------------
+ * Main area: two panes side by side. Left: the tag list (or the duplicate
+ * groups). Right: the tab's controls above the preview of the changes.
+ * ------------------------------------------------------------------------- */
+
+.tw-main {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) minmax(300px, 1fr);
   gap: 12px;
   flex: 1;
   min-height: 0;
 }
-.tc-body.tc-single {
-  grid-template-columns: 1fr;
-}
-.tc-pane {
+
+.tw-pane {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -86,72 +123,168 @@ body {
   min-width: 0;
 }
 
-.tc-toolbar {
+/* ---------------------------------------------------------------------------
+ * Controls: the toolbar above the tag list (filter, Select All, Cancel,
+ * "N selected") and label + input pairs such as the case style picker
+ * ------------------------------------------------------------------------- */
+
+.tw-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 10px;
 }
-.tc-toolbar input[type="search"],
-.tc-toolbar input[type="text"] {
+
+.tw-toolbar input[type="search"],
+.tw-toolbar input[type="text"] {
   flex: 1;
   min-width: 120px;
 }
-.tc-field {
+
+.tw-field {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.tc-scroll {
+/* ---------------------------------------------------------------------------
+ * Tables: shared look of the tag list, the preview and the fuzzy-match list.
+ * Each table sits in a bordered .tw-scroll-box that scrolls on its own.
+ * ------------------------------------------------------------------------- */
+
+.tw-scroll-box {
   flex: 1;
   min-height: 80px;
   overflow: auto;
-  border: 1px solid var(--tc-border);
+  border: 1px solid var(--tw-border);
   border-radius: 6px;
 }
-.tc-table {
+
+.tw-table {
   width: 100%;
   border-collapse: collapse;
 }
-.tc-table th {
+
+/* Header cells stay visible while the rows scroll. */
+.tw-table th {
   position: sticky;
   top: 0;
   background: Canvas;
   text-align: left;
   font-weight: 600;
   padding: 4px 8px;
-  border-bottom: 1px solid var(--tc-border);
+  border-bottom: 1px solid var(--tw-border);
 }
-.tc-table td {
+
+.tw-table td {
   padding: 3px 8px;
   vertical-align: top;
 }
-.tc-table tbody tr:hover {
-  background: var(--tc-hover);
+
+.tw-table tbody tr:hover {
+  background: var(--tw-hover);
 }
-.tc-table .tc-num {
+
+/* Cells with item counts: right-aligned digits of equal width. */
+.tw-table .tw-count {
   text-align: right;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.tc-table .tc-check {
+
+/* The narrow first column with the row's checkbox. */
+.tw-table .tw-checkbox {
   width: 1%;
   padding-right: 0;
 }
-.tc-name {
+
+/* Tag names may be long words without spaces: break them anywhere. */
+.tw-tag-name {
   overflow-wrap: anywhere;
 }
-.tc-badge {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 5px;
-  border: 1px solid var(--tc-border);
-  border-radius: 8px;
-  font-size: 0.8em;
-  color: var(--tc-muted);
+
+/* ---------------------------------------------------------------------------
+ * Sortable column headers (tag list): a header is a text button with the
+ * column name (.tw-sort-label) and a ▲/▼ arrow (.tw-sort-icon). Names that do
+ * not fit end in "…"; the full name is in the button's tooltip.
+ * ------------------------------------------------------------------------- */
+
+.tw-table th .tw-sort-button {
+  appearance: none;
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
 }
-.tc-swatch {
+
+.tw-table th .tw-sort-button:hover .tw-sort-label {
+  text-decoration: underline;
+}
+
+.tw-sort-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Always reserves room for the arrow, so headers do not shift when sorting. */
+.tw-sort-icon {
+  flex: none;
+  width: 1em;
+  margin-left: 2px;
+  font-size: 0.8em;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------------------
+ * Tag list (left pane): checkbox | Tag | Type | [Collection] | Library
+ *
+ * Fixed layout: the narrow columns keep the widths set here and the Tag
+ * column gets the rest, so long library or collection names in the headers
+ * are truncated instead of squeezing the tag names. Below the table's minimum
+ * width the list scrolls sideways.
+ *
+ * To show more of the library/collection names, raise the width of
+ * th.tw-count (the Tag column gets narrower by the same amount).
+ * ------------------------------------------------------------------------- */
+
+.tw-table.tw-tag-table {
+  table-layout: fixed;
+  min-width: 26em;
+}
+
+.tw-tag-table th.tw-checkbox {
+  width: 1.5em;
+}
+
+.tw-tag-table th.tw-tag-type {
+  width: 5.5em;
+}
+
+.tw-tag-table th.tw-count {
+  width: 4.5em;
+}
+
+.tw-tag-table td.tw-tag-type,
+.tw-tag-table td.tw-count {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "manual", "automatic" or "both" */
+.tw-table td.tw-tag-type {
+  white-space: nowrap;
+  color: var(--tw-muted);
+}
+
+/* The tag's Zotero color, shown before its name. */
+.tw-color-dot {
   display: inline-block;
   width: 0.8em;
   height: 0.8em;
@@ -159,68 +292,117 @@ body {
   border-radius: 50%;
   vertical-align: baseline;
 }
-.tc-from {
+
+/* ---------------------------------------------------------------------------
+ * Preview (right pane): one row per change, e.g. "old → new", with notes.
+ * Rows whose change cannot be applied are dimmed.
+ * ------------------------------------------------------------------------- */
+
+.tw-old-name {
   text-decoration: line-through;
-  color: var(--tc-muted);
+  color: var(--tw-muted);
 }
-.tc-arrow {
+
+.tw-rename-arrow {
   margin: 0 6px;
-  color: var(--tc-muted);
+  color: var(--tw-muted);
 }
-.tc-warn {
-  color: var(--tc-warn);
+
+.tw-warning-text {
+  color: var(--tw-warn);
 }
-.tc-bad {
-  color: var(--tc-error);
+
+.tw-error-text {
+  color: var(--tw-error);
 }
-tr.tc-disabled {
+
+tr.tw-blocked-row {
   opacity: 0.55;
 }
 
-.tc-empty {
-  padding: 16px;
-  color: var(--tc-muted);
-}
+/* ---------------------------------------------------------------------------
+ * Duplicates tab (left pane): one bordered box per group of duplicate tags,
+ * with a radio button for the name to keep, then the list of possible typos
+ * and plurals under its own section title.
+ * ------------------------------------------------------------------------- */
 
-.tc-group {
-  border: 1px solid var(--tc-border);
+.tw-duplicate-group {
+  border: 1px solid var(--tw-border);
   border-radius: 6px;
   margin: 8px;
   padding: 6px 10px;
 }
-.tc-group h3 {
+
+.tw-duplicate-group h3 {
   margin: 0 0 4px;
   font-size: 1em;
   display: flex;
   gap: 8px;
   align-items: center;
 }
-.tc-group label {
+
+.tw-duplicate-group label {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 1px 0;
 }
-.tc-section-title {
+
+.tw-section-title {
   margin: 8px 8px 0;
   font-weight: 600;
 }
 
-.tc-footer {
+/* Marks a tag as automatic ("auto"). */
+.tw-auto-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--tw-border);
+  border-radius: 8px;
+  font-size: 0.8em;
+  color: var(--tw-muted);
+}
+
+/* ---------------------------------------------------------------------------
+ * Text styles used across blocks
+ * ------------------------------------------------------------------------- */
+
+/* Secondary text: hints, the "N selected" count, the library-wide note. */
+.tw-hint {
+  color: var(--tw-muted);
+  font-size: 0.92em;
+}
+
+/* Messages inside a list: "No tags to show", "Showing the first …". */
+.tw-list-notice {
+  padding: 16px;
+  color: var(--tw-muted);
+}
+
+/* ---------------------------------------------------------------------------
+ * Footer: impact and status text on the left, then Undo, Close and Apply
+ * ------------------------------------------------------------------------- */
+
+.tw-footer {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
-  border-top: 1px solid var(--tc-border);
+  border-top: 1px solid var(--tw-border);
   padding-top: 10px;
 }
-.tc-footer .tc-grow {
+
+/* Takes the free space, pushing the buttons to the right. */
+.tw-footer .tw-footer-info {
   flex: 1;
   min-width: 200px;
 }
-.tc-status[data-kind="error"] {
-  color: var(--tc-error);
+
+.tw-status[data-kind="error"] {
+  color: var(--tw-error);
 }
-button.tc-primary {
+
+button.tw-primary-button {
   font-weight: 600;
 }

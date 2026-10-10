@@ -21,8 +21,7 @@ selected-count = { $count } selected
 tag-list-empty = No tags to show.
 tag-list-more = Showing the first { $shown } of { $total } tags. Use the filter to find the others.
 col-tag = Tag
-col-items = Library
-col-in-collection = Collection
+col-type = Type
 flag-auto = auto
 flag-color = color
 
@@ -65,6 +64,7 @@ op-remove = Remove
 op-retype = { $name }: change type to { $type }
 type-manual = manual
 type-automatic = automatic
+type-both = both
 note-merge = merges into an existing tag
 note-loses-color = loses its color
 note-empty = the new name would be empty

@@ -23,7 +23,7 @@ describe("dialog (in Zotero)", function () {
   const itemsToErase: Zotero.Item[] = [];
   const windows: Window[] = [];
 
-  async function makeItem(tags: string[]) {
+  async function makeItem(tags: Array<string | { tag: string; type: number }>) {
     const item = new Zotero.Item("book");
     item.libraryID = libraryID;
     item.setTags(tags);
@@ -153,7 +153,7 @@ describe("dialog (in Zotero)", function () {
     dialog.renderAll();
 
     const swatches = [
-      ...win.document.querySelectorAll<HTMLElement>(".tc-swatch"),
+      ...win.document.querySelectorAll<HTMLElement>(".tw-color-dot"),
     ];
     assert.lengthOf(swatches, 2);
     for (const el of swatches) {
@@ -163,6 +163,119 @@ describe("dialog (in Zotero)", function () {
     assert.isTrue(
       swatches.some((el) => el.style.backgroundColor === "rgb(255, 0, 0)"),
     );
+  });
+
+  it("clicking a count header sorts descending, ascending, then by name", async function () {
+    const [a, b, c] = [name("a"), name("b"), name("c")];
+    await makeItem([a, b, c]);
+    await makeItem([b, c]);
+    await makeItem([b]);
+    const { win, dialog } = await openDialog();
+    dialog.filter = prefix;
+    dialog.renderAll();
+    const doc = win.document;
+    const header = doc.querySelector<HTMLButtonElement>(
+      '.tw-sort-button[data-sort="items"]',
+    )!;
+    const listed = () =>
+      [...doc.querySelectorAll(".tw-table tbody .tw-checkbox input")].map(
+        (el) => el.getAttribute("aria-label"),
+      );
+
+    assert.deepEqual(listed(), [a, b, c]);
+    header.click();
+    assert.deepEqual(listed(), [b, c, a]);
+    assert.equal(header.parentElement!.getAttribute("aria-sort"), "descending");
+    header.click();
+    assert.deepEqual(listed(), [a, c, b]);
+    assert.equal(header.parentElement!.getAttribute("aria-sort"), "ascending");
+    header.click();
+    assert.deepEqual(listed(), [a, b, c]);
+    assert.equal(header.parentElement!.getAttribute("aria-sort"), "none");
+  });
+
+  it("the Tag and Type headers sort by name and by manual/automatic", async function () {
+    const [a, b, c] = [name("a"), name("b"), name("c")];
+    await makeItem([{ tag: a, type: 1 }, b, c]);
+    await makeItem([{ tag: b, type: 1 }]);
+    const { win, dialog } = await openDialog();
+    dialog.filter = prefix;
+    dialog.renderAll();
+    const doc = win.document;
+    const header = (key: string) =>
+      doc.querySelector<HTMLButtonElement>(
+        `.tw-sort-button[data-sort="${key}"]`,
+      )!;
+    const listed = () =>
+      [...doc.querySelectorAll(".tw-table tbody .tw-checkbox input")].map(
+        (el) => el.getAttribute("aria-label"),
+      );
+
+    assert.equal(
+      header("name").parentElement!.getAttribute("aria-sort"),
+      "ascending",
+    );
+    assert.deepEqual(
+      [...doc.querySelectorAll(".tw-table tbody .tw-tag-type")].map(
+        (el) => el.textContent,
+      ),
+      ["automatic", "both", "manual"],
+    );
+    header("name").click();
+    assert.deepEqual(listed(), [c, b, a]);
+    header("type").click();
+    assert.deepEqual(listed(), [c, b, a], "manual, both, automatic");
+    assert.equal(
+      header("name").parentElement!.getAttribute("aria-sort"),
+      "none",
+    );
+    header("type").click();
+    assert.deepEqual(listed(), [a, b, c], "automatic, both, manual");
+    header("type").click();
+    assert.deepEqual(listed(), [a, b, c], "back to name order");
+    assert.equal(
+      header("name").parentElement!.getAttribute("aria-sort"),
+      "ascending",
+    );
+  });
+
+  it("Cancel is enabled only while tags are selected and deselects them", async function () {
+    const [a, b] = [name("a"), name("b")];
+    await makeItem([a, b]);
+    const { win, dialog } = await openDialog();
+    dialog.filter = prefix;
+    dialog.renderAll();
+    const doc = win.document;
+    const selectAll = doc.querySelector<HTMLButtonElement>(".tw-select-all")!;
+    const cancel = doc.querySelector<HTMLButtonElement>(".tw-select-none")!;
+    const box = () =>
+      doc.querySelector<HTMLInputElement>(
+        `.tw-checkbox input[aria-label="${a}"]`,
+      )!;
+
+    assert.isTrue(cancel.disabled);
+    selectAll.click();
+    assert.deepEqual([...dialog.selected].sort(), [a, b]);
+    assert.isFalse(cancel.disabled);
+    cancel.click();
+    assert.equal(dialog.selected.size, 0);
+    assert.isTrue(cancel.disabled);
+
+    // Ticking and unticking a tag by hand updates Cancel too.
+    box().click();
+    assert.deepEqual([...dialog.selected], [a]);
+    assert.isFalse(cancel.disabled);
+    box().click();
+    assert.isTrue(cancel.disabled);
+  });
+
+  it("the count column is labelled with the library's name", async function () {
+    const { win } = await openDialog();
+    const label = win.document.querySelector(
+      '.tw-sort-button[data-sort="items"] .tw-sort-label',
+    );
+    const library = Zotero.Libraries.get(libraryID) as Zotero.Library;
+    assert.equal(label?.textContent, library.name);
   });
 
   describe("legacy menus", function () {
