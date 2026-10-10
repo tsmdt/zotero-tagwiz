@@ -1249,8 +1249,13 @@ export class TagWizDialog {
         ];
       case "remove":
         return [
-          doc.createTextNode(`${getString("op-remove")}: `),
-          h(doc, "strong", {}, op.tag.name),
+          h(
+            doc,
+            "span",
+            { class: "tw-warning-text" },
+            `${getString("op-remove")}: `,
+            h(doc, "strong", {}, op.tag.name),
+          ),
         ];
       case "retype":
         return [
