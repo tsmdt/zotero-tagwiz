@@ -440,13 +440,31 @@ button:not(.tw-tab, .tw-sort-button):disabled {
 }
 
 /*
- * Resizable columns: drag the line at a header's right edge (.tw-col-resizer)
- * to change that column's width, double-click it to restore the defaults.
- * Once resized (.tw-sized) every column has an exact width set by
- * src/ui/dialog.ts and the table is as wide as its columns.
+ * Resizable columns (tag list and preview): drag the line at a header's right
+ * edge (.tw-col-resizer) to change that column's width, double-click it to
+ * restore the defaults. Once resized (.tw-sized) every column has an exact
+ * width set by src/ui/dialog.ts and the table is as wide as its columns.
+ * Text that no longer fits is cut off.
  */
-.tw-table.tw-tag-table.tw-sized {
+.tw-table.tw-sized {
+  table-layout: fixed;
   min-width: 0;
+}
+
+.tw-table.tw-sized td {
+  overflow: hidden;
+}
+
+.tw-table.tw-sized td.tw-count {
+  text-overflow: ellipsis;
+}
+
+/* The preview's plain-text headers end in "…" (the tag list's sort buttons
+ * already do). */
+.tw-preview-table.tw-sized th {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .tw-col-resizer {
