@@ -818,7 +818,12 @@ export class TagWizDialog {
               this.refreshPlan();
             },
           }),
-          getString(label),
+          h(
+            doc,
+            "span",
+            { class: "tw-field-text", title: getString(label) },
+            getString(label),
+          ),
         );
       append(this.controlsEl, [
         h(
@@ -855,11 +860,21 @@ export class TagWizDialog {
           }),
           list,
         ),
-        h(doc, "div", { class: "tw-hint" }, getString("unify-hint")),
+        h(
+          doc,
+          "div",
+          { class: "tw-hint", title: getString("unify-hint") },
+          getString("unify-hint"),
+        ),
       ]);
     } else if (this.tab === "remove") {
       append(this.controlsEl, [
-        h(doc, "div", { class: "tw-hint" }, getString("remove-hint")),
+        h(
+          doc,
+          "div",
+          { class: "tw-hint", title: getString("remove-hint") },
+          getString("remove-hint"),
+        ),
       ]);
     } else if (this.tab === "duplicates") {
       const tier = h(doc, "select", {

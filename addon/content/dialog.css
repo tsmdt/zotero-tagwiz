@@ -112,26 +112,61 @@ body {
   border-bottom: 1px solid var(--tw-band);
 }
 
-/* Options of the active tab: style picker, merge target, duplicate level… */
+/*
+ * Options of the active tab: style picker, merge target, duplicate level…
+ * One row of the same height on every tab, centered vertically: the band
+ * is pinned to one control row (--tw-row) plus padding, and its dropdowns
+ * and text fields are pinned to that row too, so a tab with a dropdown is
+ * no taller than one with only a hint. It never wraps: in a narrow window
+ * hints and checkbox labels end in "…" instead (their full text is in the
+ * tooltip).
+ */
 .tw-options {
+  flex: none;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 6px 16px;
+  gap: 16px;
+  box-sizing: content-box;
+  height: var(--tw-row);
   min-height: var(--tw-row);
+  max-height: var(--tw-row);
   padding: 6px 10px;
+  overflow: hidden;
   background: var(--tw-band);
   border: 1px solid var(--tw-border);
   border-radius: 0 6px 6px 6px;
+}
+
+.tw-options>* {
+  flex: none;
+}
+
+.tw-options select,
+.tw-options input[type="text"] {
+  box-sizing: border-box;
+  height: var(--tw-row);
+  margin-block: 0;
+}
+
+.tw-options input[type="checkbox"] {
+  margin-block: 0;
 }
 
 .tw-options input[type="text"] {
   width: 18em;
 }
 
-/* Long hints take the rest of the row and wrap there. */
-.tw-options .tw-hint {
-  flex: 1 1 16em;
+.tw-options>.tw-hint,
+.tw-options>label.tw-field {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.tw-options .tw-hint,
+.tw-options .tw-field-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* ---------------------------------------------------------------------------
