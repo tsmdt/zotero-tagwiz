@@ -226,6 +226,15 @@ body {
   gap: 6px;
 }
 
+/* Thin vertical line between items of a row (the header, the options band);
+ * the row's gap spaces it */
+.tw-separator {
+  flex: none;
+  align-self: stretch;
+  width: 1px;
+  background: var(--tw-border);
+}
+
 /* ---------------------------------------------------------------------------
  * Search fields, text fields and buttons: the tabs' look, a thin border with
  * rounded corners, one control row high. The tabs and the sortable column

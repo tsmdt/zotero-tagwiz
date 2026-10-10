@@ -456,6 +456,7 @@ export class TagWizDialog {
             args: { collection: this.collection.name },
           }),
         ),
+        h(doc, "div", { class: "tw-separator" }),
         h(
           doc,
           "label",
@@ -903,7 +904,9 @@ export class TagWizDialog {
           h(doc, "label", { for: "tw-style" }, getString("case-style")),
           style,
         ),
+        h(doc, "div", { class: "tw-separator" }),
         check("tw-acr", "case-keep-acronyms", "keepAcronyms"),
+        h(doc, "div", { class: "tw-separator" }),
         h(
           doc,
           "div",
