@@ -100,16 +100,12 @@ export function buildUnifyPlan(
   allTags: readonly TagRef[],
 ): ChangePlan {
   const to = cleanName(target);
+  // finalize flags merges: into an existing tag, or several sources into a
+  // new one. Renaming one tag to a new name merges nothing.
   const rows = sources
     .filter((tag) => tag.name !== to)
-    .map((tag) => {
-      const r = row({ kind: "rename", from: tag, to });
-      return r;
-    });
-  const plan = finalize(rows, allTags);
-  // Everything lands on one name by definition.
-  for (const r of plan.rows) if (!r.error) r.merges = true;
-  return plan;
+    .map((tag) => row({ kind: "rename", from: tag, to }));
+  return finalize(rows, allTags);
 }
 
 export function buildRemovePlan(
@@ -128,6 +124,8 @@ export function buildRemovePlan(
  * Merge every non-canonical member into the canonical one. Members with the
  * canonical's name but the other type are re-typed instead (items keep the tag).
  * `chosen` maps a group to the survivor the user picked (default: suggested).
+ * The survivor is a name: if it exists as a manual tag, that one survives,
+ * so merging never turns manual tags automatic (as in pickCanonical).
  */
 export function buildDuplicatePlan(
   groups: readonly DuplicateGroup[],
@@ -136,7 +134,13 @@ export function buildDuplicatePlan(
 ): ChangePlan {
   const rows: PlanRow[] = [];
   for (const group of groups) {
-    const canonical = chosen.get(group) ?? group.canonical;
+    const picked = chosen.get(group) ?? group.canonical;
+    const canonical =
+      group.members.find((m) => m.name === picked.name && m.type === 0) ??
+      group.members.find(
+        (m) => m.name === picked.name && m.type === picked.type,
+      ) ??
+      picked;
     for (const member of group.members) {
       if (member === canonical) continue;
       if (member.name === canonical.name) {

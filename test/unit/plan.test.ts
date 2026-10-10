@@ -85,6 +85,15 @@ describe("plan", function () {
       assert.isTrue(plan.rows.every((r) => r.merges));
     });
 
+    it("renaming one tag to a new name is not a merge", function () {
+      const all = [t("foo", 3), t("bar")];
+      const single = buildUnifyPlan([all[0]], "brand new", all);
+      assert.lengthOf(single.rows, 1);
+      assert.isFalse(single.rows[0].merges);
+      const both = buildUnifyPlan(all, "brand new", all);
+      assert.isTrue(both.rows.every((r) => r.merges));
+    });
+
     it("rejects an empty target", function () {
       const all = [t("a"), t("b")];
       const plan = buildUnifyPlan(all, "   ", all);
@@ -124,6 +133,20 @@ describe("plan", function () {
         tag: all[1],
         toType: 0,
       });
+    });
+
+    it("keeps the manual variant when the user picks the automatic one", function () {
+      const all = [t("foo", 5), t("foo", 1, { type: 1 }), t("Foo", 2)];
+      const groups = findDuplicateGroups(all, "case");
+      const plan = buildDuplicatePlan(
+        groups,
+        all,
+        new Map([[groups[0], all[1]]]),
+      );
+      const ops = includedOps(plan);
+      assert.deepEqual(ops.map((op) => op.kind).sort(), ["rename", "retype"]);
+      const retype = ops.find((op) => op.kind === "retype")!;
+      assert.deepEqual(retype, { kind: "retype", tag: all[1], toType: 0 });
     });
 
     it("honours the user's canonical choice", function () {
