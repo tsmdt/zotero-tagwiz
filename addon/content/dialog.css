@@ -528,8 +528,6 @@ tr.tw-blocked-row {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
-  border-top: 1px solid var(--tw-border);
-  padding-top: 10px;
 }
 
 /* Takes the free space, pushing the buttons to the right. */
