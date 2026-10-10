@@ -136,7 +136,7 @@ body {
   border-radius: 0 6px 6px 6px;
 }
 
-.tw-options>* {
+.tw-options > * {
   flex: none;
 }
 
@@ -158,8 +158,8 @@ body {
   width: 8em;
 }
 
-.tw-options>.tw-hint,
-.tw-options>label.tw-field {
+.tw-options > .tw-hint,
+.tw-options > label.tw-field {
   flex: 0 1 auto;
   min-width: 0;
 }
