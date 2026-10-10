@@ -40,6 +40,7 @@ case-prefix-placeholder = e.g. TECH:
 case-prefix-hint = Tags starting with this text keep it exactly as typed (case-sensitive, spaces count).
 
 unify-target = New name
+unify-target-placeholder = Type a new tag label...
 unify-hint = Select one tag to rename it, or several to merge them into one. Then choose or type the new name.
 remove-hint = Select the tags to delete from every item in the library.
 

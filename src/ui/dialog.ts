@@ -941,6 +941,7 @@ export class TagWizDialog {
           h(doc, "input", {
             type: "text",
             id: "tw-target",
+            placeholder: getString("unify-target-placeholder"),
             list: "tw-targets",
             value: this.unifyTarget,
             oninput: (e: Event) => {

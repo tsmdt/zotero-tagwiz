@@ -95,4 +95,5 @@ export type FluentMessageId =
   | 'undo-none'
   | 'undo-unavailable'
   | 'unify-hint'
-  | 'unify-target';
+  | 'unify-target'
+  | 'unify-target-placeholder';
