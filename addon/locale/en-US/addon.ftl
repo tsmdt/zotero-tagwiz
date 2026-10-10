@@ -10,9 +10,9 @@ include-subcollections = Include subcollections
 edits-library-wide = Changes always apply to the whole library.
 
 tab-case = Change Case
-tab-unify = Merge
+tab-unify = Rename & Merge
 tab-remove = Remove
-tab-duplicates = Duplicates
+tab-duplicates = Clean Duplicates
 
 filter-placeholder = Filter tags… 
 select-shown = Select All
@@ -37,8 +37,8 @@ case-kebab = kebab-case
 case-keep-acronyms = Keep ALL-CAPS words (Title/Sentence case)
 case-preserve-prefix = Keep the part before “:” or “/”
 
-unify-target = Merge into
-unify-hint = Select the tags to merge, then choose or type the name they should all become.
+unify-target = New name
+unify-hint = Select one tag to rename it, or several to merge them into one. Then choose or type the new name.
 remove-hint = Select the tags to delete from every item in the library.
 
 dup-level = Treat as duplicates
