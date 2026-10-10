@@ -29,6 +29,10 @@ jobs:
         with:
           node-version: 24
           fetch-all: true
+          # `zotero-plugin release` in CI only uses the GitHub API (no git
+          # push), so don't leave the write token in .git/config while npm
+          # install scripts and the build run.
+          persist-credentials: false
 
       - name: Build
         run: npm run build
