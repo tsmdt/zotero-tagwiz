@@ -1,6 +1,10 @@
 # TagWiz 🏷️
 
-TagWiz is a [Zotero](https://www.zotero.org/) plugin for cleaning up tags in bulk: change their case, rename or merge them, remove several at once, and find and merge duplicates.
+TagWiz is a tag editor for [Zotero](https://www.zotero.org/) that tames the sprawling tags in your library with a flick of its wand. 🧙‍♂️🔮
+
+In other words: its a plugin for cleaning up tags in bulk: change their case, rename them or merge multiple tags into one, remove several at once, and find and merge duplicates.
+
+<img src="./assets/tagwiz.png" alt="TagWiz" width="80%">
 
 ## Table of contents
 
