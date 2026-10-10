@@ -124,15 +124,9 @@ function convertBody(body: string, opts: CaseOptions): string {
  */
 export function convertCase(name: string, opts: CaseOptions): string {
   const input = name.normalize("NFC");
-  let prefix = "";
-  let body = input;
-  if (opts.preservePrefix) {
-    const idx = Math.max(input.lastIndexOf(":"), input.lastIndexOf("/"));
-    if (idx >= 0) {
-      prefix = input.slice(0, idx + 1);
-      body = input.slice(idx + 1);
-    }
-  }
+  const wanted = (opts.prefix ?? "").normalize("NFC");
+  const prefix = wanted && input.startsWith(wanted) ? wanted : "";
+  const body = input.slice(prefix.length);
   const lead = /^\s*/u.exec(body)?.[0] ?? "";
   const result = convertBody(body.slice(lead.length), opts);
   return (prefix + (prefix ? lead : "") + result).normalize("NFC").trim();

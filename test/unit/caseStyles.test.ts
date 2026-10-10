@@ -83,20 +83,38 @@ describe("convertCase", function () {
     assert.notInclude(c("TITLE", "lower", { keepAcronyms: false }), "ı");
   });
 
-  it("preservePrefix leaves everything up to the last : or / alone", function () {
+  it("keeps a user-given prefix unchanged", function () {
     assert.equal(
-      c("topic:machine learning", "title", { preservePrefix: true }),
-      "topic:Machine Learning",
+      c("00_Digital Humanities", "camel", { prefix: "00_" }),
+      "00_digitalHumanities",
     );
     assert.equal(
-      c("Area/Sub Topic", "lower", { preservePrefix: true }),
-      "Area/sub topic",
+      c("Aa-Computational-Studies", "kebab", { prefix: "Aa-" }),
+      "Aa-computational-studies",
     );
     assert.equal(
-      c("topic: foo bar", "title", { preservePrefix: true }),
-      "topic: Foo Bar",
+      c("TECH: 2026 deep learning", "camel", { prefix: "TECH: " }),
+      "TECH: 2026DeepLearning",
     );
+    assert.equal(
+      c("topic:machine learning", "upper", { prefix: "topic:" }),
+      "topic:MACHINE LEARNING",
+    );
+  });
+
+  it("converts the whole tag when the prefix does not match exactly", function () {
+    assert.equal(
+      c("tech: deep learning", "camel", { prefix: "TECH: " }),
+      "techDeepLearning",
+    );
+    assert.equal(c("Deep Learning", "lower", { prefix: "" }), "deep learning");
     assert.equal(c("topic:machine", "upper"), "TOPIC:MACHINE");
+  });
+
+  it("is idempotent with a prefix", function () {
+    const opts = { prefix: "TECH: " };
+    const once = c("TECH: 2026 deep learning", "camel", opts);
+    assert.equal(c(once, "camel", opts), once);
   });
 
   it("is idempotent for every style", function () {

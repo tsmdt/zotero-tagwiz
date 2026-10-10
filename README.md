@@ -35,7 +35,7 @@ Pick a tab, select tags (the filter box helps with long lists), check the previe
 Choose a style: lower case, UPPER CASE, Title Case, Sentence case, camelCase, PascalCase, snake_case or kebab-case. For example, `machine learning` becomes `Machine Learning` in Title Case and `machine_learning` in snake_case. Two options refine the result:
 
 - **Keep ALL-CAPS words**: words like `NLP` stay as they are in every style. `NLP methods` becomes `NLP Methods` in Title Case instead of `Nlp Methods`, and `LLM Framework Studies` becomes `LLMframeworkStudies` in camelCase.
-- **Keep the part before ":" or "/"**: in `topic:machine learning` only the part after the colon changes.
+- **Keep prefix**: type a prefix such as `TECH: `, `00_` or `Aa-`. In tags that start with exactly this text (case-sensitive, spaces count), the prefix stays as typed and only the rest changes: `TECH: 2026 deep learning` becomes `TECH: 2026DeepLearning` in camelCase. Leave it empty to convert whole tags.
 
 If two tags end up with the same name, the preview marks them as a merge.
 

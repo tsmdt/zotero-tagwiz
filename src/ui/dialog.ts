@@ -170,7 +170,7 @@ export class TagWizDialog {
   private caseOpts: CaseOptions = {
     style: "title",
     keepAcronyms: true,
-    preservePrefix: false,
+    prefix: "",
     smallWords: DEFAULT_SMALL_WORDS,
   };
   private unifyTarget = "";
@@ -871,11 +871,7 @@ export class TagWizDialog {
           ),
         );
       }
-      const check = (
-        id: string,
-        label: FluentMessageId,
-        key: "keepAcronyms" | "preservePrefix",
-      ) =>
+      const check = (id: string, label: FluentMessageId, key: "keepAcronyms") =>
         h(
           doc,
           "label",
@@ -908,7 +904,25 @@ export class TagWizDialog {
           style,
         ),
         check("tw-acr", "case-keep-acronyms", "keepAcronyms"),
-        check("tw-pre", "case-preserve-prefix", "preservePrefix"),
+        h(
+          doc,
+          "div",
+          { class: "tw-field", title: getString("case-prefix-hint") },
+          h(doc, "label", { for: "tw-prefix" }, getString("case-prefix")),
+          h(doc, "input", {
+            type: "text",
+            id: "tw-prefix",
+            placeholder: getString("case-prefix-placeholder"),
+            value: this.caseOpts.prefix ?? "",
+            oninput: (e: Event) => {
+              this.caseOpts = {
+                ...this.caseOpts,
+                prefix: (e.target as HTMLInputElement).value,
+              };
+              this.refreshPlan();
+            },
+          }),
+        ),
       ]);
     } else if (this.tab === "unify") {
       const names = this.rows.filter((r) => this.selected.has(r.name));

@@ -154,6 +154,10 @@ body {
   width: 18em;
 }
 
+.tw-options input#tw-prefix {
+  width: 8em;
+}
+
 .tw-options>.tw-hint,
 .tw-options>label.tw-field {
   flex: 0 1 auto;

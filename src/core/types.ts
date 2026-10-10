@@ -27,8 +27,8 @@ export interface CaseOptions {
   style: CaseStyle;
   /** Keep all-caps words of 2+ letters (e.g. "NLP") in every style. Default true. */
   keepAcronyms?: boolean;
-  /** Leave everything up to the last ":" or "/" unchanged (e.g. "topic:Foo"). Default false. */
-  preservePrefix?: boolean;
+  /** Tags starting with this exact prefix (e.g. "TECH: ") keep it unchanged. Default "" (off). */
+  prefix?: string;
   /** Title case: words kept lowercase unless first. */
   smallWords?: readonly string[];
 }

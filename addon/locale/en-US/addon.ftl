@@ -35,7 +35,9 @@ case-pascal = PascalCase
 case-snake = snake_case
 case-kebab = kebab-case
 case-keep-acronyms = Keep ALL-CAPS words
-case-preserve-prefix = Keep the part before “:” or “/”
+case-prefix = Keep prefix
+case-prefix-placeholder = e.g. TECH:
+case-prefix-hint = Tags starting with this text keep it exactly as typed (case-sensitive, spaces count).
 
 unify-target = New name
 unify-hint = Select one tag to rename it, or several to merge them into one. Then choose or type the new name.
