@@ -35,8 +35,8 @@ export interface DialogParams {
   collection?: { id: number; name: string };
 }
 
-type TabID = "case" | "unify" | "remove" | "duplicates";
-const TABS: TabID[] = ["case", "unify", "remove", "duplicates"];
+type TabID = "case" | "unify" | "duplicates" | "remove";
+const TABS: TabID[] = ["case", "unify", "duplicates", "remove"];
 
 /** One listed tag name; `refs` are all of its types in the whole library. */
 interface NameRow {
@@ -80,6 +80,7 @@ interface Sort {
 }
 /** `rows` are kept in this order, so it needs no sorting. */
 const DEFAULT_SORT: Sort = { key: "name", dir: "asc" };
+
 /** Direction of a column's first click: counts start with the most used. */
 const FIRST_DIR: Record<SortKey, Sort["dir"]> = {
   name: "asc",
