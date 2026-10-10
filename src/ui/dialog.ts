@@ -35,8 +35,8 @@ export interface DialogParams {
   collection?: { id: number; name: string };
 }
 
-type TabID = "case" | "unify" | "remove" | "duplicates";
-const TABS: TabID[] = ["case", "unify", "remove", "duplicates"];
+type TabID = "case" | "unify" | "duplicates" | "remove";
+const TABS: TabID[] = ["case", "unify", "duplicates", "remove"];
 
 /** One listed tag name; `refs` are all of its types in the whole library. */
 interface NameRow {
@@ -80,6 +80,7 @@ interface Sort {
 }
 /** `rows` are kept in this order, so it needs no sorting. */
 const DEFAULT_SORT: Sort = { key: "name", dir: "asc" };
+
 /** Direction of a column's first click: counts start with the most used. */
 const FIRST_DIR: Record<SortKey, Sort["dir"]> = {
   name: "asc",
@@ -110,6 +111,9 @@ function compareRows(key: SortKey): (a: NameRow, b: NameRow) => number {
       return (a, b) => (a[key] ?? 0) - (b[key] ?? 0);
   }
 }
+
+/** Narrowest a tag list column can be dragged, in px. */
+const MIN_COLUMN_WIDTH = 32;
 
 const MAX_FUZZY = 100;
 /** Rows rendered at most in the tag list and the preview (all still apply). */
@@ -156,6 +160,8 @@ export class TagWizDialog {
   private includeSub = true;
   private filter = "";
   private sort: Sort = DEFAULT_SORT;
+  /** Tag list column widths in px, in column order, once the user resized one. */
+  private columnWidths?: number[];
   private allTags: TagRef[] = [];
   private rows: NameRow[] = [];
   private selected = new Set<string>();
@@ -639,6 +645,15 @@ export class TagWizDialog {
           h(doc, "span", { class: "tw-sort-label" }, label),
           icon,
         ),
+        h(doc, "span", {
+          class: "tw-col-resizer",
+          "aria-hidden": "true",
+          onpointerdown: (e: PointerEvent) => this.startResize(e, th),
+          ondblclick: () => {
+            this.columnWidths = undefined;
+            this.applyColumnWidths(th.closest("table") as HTMLTableElement);
+          },
+        }),
       );
       const update = () => {
         const dir = this.sort.key === key ? this.sort.dir : undefined;
@@ -681,6 +696,71 @@ export class TagWizDialog {
       toolbar,
       h(doc, "div", { class: "tw-scroll-box" }, table, more),
     ]);
+    // Only once in the document: it reads the headers' computed padding.
+    this.applyColumnWidths(table);
+  }
+
+  /**
+   * Size the tag list's columns: the CSS defaults, or the widths the user
+   * dragged. Dragged widths are exact, like in a spreadsheet: the table is as
+   * wide as its columns, so it may leave room on the right or scroll sideways.
+   */
+  private applyColumnWidths(table: HTMLTableElement) {
+    const cells = [...table.querySelectorAll<HTMLElement>("thead th")];
+    const widths = this.columnWidths;
+    table.classList.toggle("tw-sized", !!widths);
+    table.style.width = widths
+      ? `${widths.reduce((sum, w) => sum + w, 0)}px`
+      : "";
+    cells.forEach((th, i) => {
+      if (!widths) {
+        th.style.width = "";
+        return;
+      }
+      // `width` excludes the padding; the stored widths include it.
+      const style = this.win.getComputedStyle(th)!;
+      const padding =
+        parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+      th.style.width = `${Math.max(0, widths[i] - padding)}px`;
+    });
+  }
+
+  /** Drag a header's right edge to resize its column; the others stay put. */
+  private startResize(e: PointerEvent, th: HTMLElement) {
+    if (e.button !== 0) return;
+    e.preventDefault(); // no text selection while dragging
+    e.stopPropagation();
+    const table = th.closest("table") as HTMLTableElement;
+    const cells = [...table.querySelectorAll<HTMLElement>("thead th")];
+    const index = cells.indexOf(th);
+    // Pin every column at its current width, so only this one moves.
+    const widths = cells.map((cell) => cell.getBoundingClientRect().width);
+    this.columnWidths = widths;
+    this.applyColumnWidths(table);
+
+    const startX = e.clientX;
+    const startWidth = widths[index];
+    const grip = e.currentTarget as HTMLElement;
+    const root = this.doc.documentElement!;
+    grip.classList.add("tw-active");
+    root.classList.add("tw-resizing");
+    const move = (ev: PointerEvent) => {
+      widths[index] = Math.max(
+        MIN_COLUMN_WIDTH,
+        startWidth + ev.clientX - startX,
+      );
+      this.applyColumnWidths(table);
+    };
+    const end = () => {
+      grip.classList.remove("tw-active");
+      root.classList.remove("tw-resizing");
+      this.doc.removeEventListener("pointermove", move);
+      this.doc.removeEventListener("pointerup", end);
+      this.doc.removeEventListener("pointercancel", end);
+    };
+    this.doc.addEventListener("pointermove", move);
+    this.doc.addEventListener("pointerup", end);
+    this.doc.addEventListener("pointercancel", end);
   }
 
   private fillRows(

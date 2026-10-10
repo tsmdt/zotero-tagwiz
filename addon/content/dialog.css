@@ -416,6 +416,50 @@ button:not(.tw-tab, .tw-sort-button):disabled {
   text-overflow: ellipsis;
 }
 
+/*
+ * Resizable columns: drag the line at a header's right edge (.tw-col-resizer)
+ * to change that column's width, double-click it to restore the defaults.
+ * Once resized (.tw-sized) every column has an exact width set by
+ * src/ui/dialog.ts and the table is as wide as its columns.
+ */
+.tw-table.tw-tag-table.tw-sized {
+  min-width: 0;
+}
+
+.tw-col-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+/* The visible divider line, centered in the grab area. */
+.tw-col-resizer::after {
+  content: "";
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  right: 3px;
+  border-right: 1px solid var(--tw-border);
+}
+
+.tw-col-resizer:hover::after,
+.tw-col-resizer.tw-active::after {
+  top: 0;
+  bottom: 0;
+  border-right: 2px solid var(--tw-accent);
+}
+
+/* While dragging: the resize cursor everywhere, no text selection. */
+:root.tw-resizing,
+:root.tw-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
 /* "manual", "automatic" or "both" */
 .tw-table td.tw-tag-type {
   white-space: nowrap;
