@@ -291,6 +291,14 @@ button:not(.tw-tab, .tw-sort-button):disabled {
   border-radius: 6px;
 }
 
+/* A box with only a message ("Nothing to change"): centered both ways. */
+.tw-scroll-box.tw-empty-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
 .tw-table {
   width: 100%;
   border-collapse: collapse;

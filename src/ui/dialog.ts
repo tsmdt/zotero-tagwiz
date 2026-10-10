@@ -1068,7 +1068,7 @@ export class TagWizDialog {
         h(
           doc,
           "div",
-          { class: "tw-scroll-box" },
+          { class: "tw-scroll-box tw-empty-box" },
           h(
             doc,
             "div",
