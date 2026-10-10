@@ -293,6 +293,7 @@ button:not(.tw-tab, .tw-sort-button):disabled {
   overflow: auto;
   border: 1px solid var(--tw-border);
   border-radius: 6px;
+  background: #fff;
 }
 
 /* A box with only a message ("Nothing to change"): centered both ways. */
