@@ -278,6 +278,38 @@ describe("dialog (in Zotero)", function () {
     assert.equal(label?.textContent, library.name);
   });
 
+  it("dragging a header's edge resizes only that column", async function () {
+    const { win, dialog } = await openDialog();
+    const doc = win.document;
+    const th = (key: string) =>
+      doc.querySelector<HTMLButtonElement>(
+        `.tw-sort-button[data-sort="${key}"]`,
+      )!.parentElement!;
+    const width = (key: string) => th(key).getBoundingClientRect().width;
+    const pointer = (target: EventTarget, type: string, clientX: number) =>
+      target.dispatchEvent(
+        new win.PointerEvent(type, { bubbles: true, button: 0, clientX }),
+      );
+    const [type, items] = [width("type"), width("items")];
+    const grip = th("type").querySelector(".tw-col-resizer")!;
+    const x = th("type").getBoundingClientRect().right;
+
+    pointer(grip, "pointerdown", x);
+    pointer(doc, "pointermove", x + 40);
+    pointer(doc, "pointerup", x + 40);
+    assert.approximately(width("type"), type + 40, 1);
+    assert.approximately(width("items"), items, 1);
+
+    // The widths survive a re-render, and a double-click restores the defaults.
+    dialog.renderAll();
+    assert.approximately(width("type"), type + 40, 1);
+    th("type")
+      .querySelector(".tw-col-resizer")!
+      .dispatchEvent(new win.MouseEvent("dblclick", { bubbles: true }));
+    assert.isUndefined(dialog.columnWidths);
+    assert.approximately(width("type"), type, 1);
+  });
+
   describe("legacy menus", function () {
     it("are added once per window and removed per window", function () {
       const win = Zotero.getMainWindow();
