@@ -141,8 +141,7 @@ body {
   flex: none;
 }
 
-.tw-options select,
-.tw-options input[type="text"] {
+.tw-options select {
   box-sizing: border-box;
   height: var(--tw-row);
   margin-block: 0;
@@ -222,6 +221,62 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Search fields, text fields and buttons: the tabs' look, a thin border with
+ * rounded corners, one control row high. The tabs and the sortable column
+ * headers keep their own styles.
+ * ------------------------------------------------------------------------- */
+
+input[type="search"],
+input[type="text"],
+button:not(.tw-tab, .tw-sort-button) {
+  appearance: none;
+  box-sizing: border-box;
+  height: var(--tw-row);
+  margin: 0;
+  border: 1px solid var(--tw-border);
+  border-radius: 6px;
+  color: inherit;
+  font: inherit;
+}
+
+input[type="search"],
+input[type="text"] {
+  padding: 0 8px;
+  background: #fff;
+}
+
+input[type="search"]::placeholder,
+input[type="text"]::placeholder {
+  color: var(--tw-muted);
+}
+
+input[type="search"]:focus,
+input[type="text"]:focus {
+  border-color: var(--tw-accent);
+  outline: 1px solid var(--tw-accent);
+}
+
+button:not(.tw-tab, .tw-sort-button) {
+  padding: 0 12px;
+  background: var(--tw-band);
+  cursor: pointer;
+}
+
+button:not(.tw-tab, .tw-sort-button):hover:not(:disabled) {
+  background: var(--tw-hover);
+}
+
+button:not(.tw-tab, .tw-sort-button):focus-visible {
+  outline: 2px solid var(--tw-accent);
+  outline-offset: 1px;
+}
+
+button:not(.tw-tab, .tw-sort-button):disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* ---------------------------------------------------------------------------
@@ -482,4 +537,5 @@ tr.tw-blocked-row {
 
 button.tw-primary-button {
   font-weight: 600;
+  border-color: var(--tw-accent);
 }
