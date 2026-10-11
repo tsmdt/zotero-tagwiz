@@ -4,7 +4,7 @@ TagWiz is a tag editor for [Zotero](https://www.zotero.org/) that tames the spra
 
 In other words: its a plugin for cleaning up tags in bulk: change their case, rename them or merge multiple tags into one, remove several at once, and find and merge duplicates.
 
-<img src="./assets/tagwiz.png" alt="TagWiz" width="90%">
+<img src="./assets/tagwiz.png" alt="TagWiz" width="100%">
 
 ## Table of contents
 
