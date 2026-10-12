@@ -44,6 +44,13 @@ describe("plan", function () {
       assert.isUndefined(plan.rows[0].error);
     });
 
+    it("never merges a '_' workflow tag into its bare name", function () {
+      const all = [t("_todo", 40), t("todo", 3)];
+      for (const style of ["snake", "kebab", "camel"] as const) {
+        assert.lengthOf(buildCasePlan([all[0]], { style }, all).rows, 0, style);
+      }
+    });
+
     it("flags two sources collapsing to one name", function () {
       const all = [t("Foo"), t("FOO")];
       const plan = buildCasePlan(

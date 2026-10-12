@@ -2,6 +2,7 @@ import { affectedNames, Task, toTasks } from "../core/tasks";
 import type { Op, TagRef, TagType } from "../core/types";
 import { preflight } from "./guard";
 import {
+  deleteJournal,
   Journal,
   nextJournalID,
   pruneJournals,
@@ -40,6 +41,7 @@ export interface ApplyOptions {
 }
 
 export interface ApplyResult {
+  /** "" if no journal was kept: there were no tasks, or nothing changed. */
   journalId: string;
   status: "done" | "failed" | "cancelled";
   completedTasks: number;
@@ -277,6 +279,9 @@ export async function applyOps(opts: ApplyOptions): Promise<ApplyResult> {
   };
   await writeJournal(journal);
 
+  // The journal is written once now and once at the end. `before` is all a
+  // forced undo needs after a crash; rewriting the whole file after every
+  // task would cost O(tasks × journal size) for a progress count only.
   let status: ApplyResult["status"] = "done";
   let error: string | undefined;
   let skippedTasks = 0;
@@ -285,10 +290,17 @@ export async function applyOps(opts: ApplyOptions): Promise<ApplyResult> {
       status = "cancelled";
       break;
     }
+    // The fast paths (Zotero.Tags.rename/removeFromLibrary) don't check
+    // permissions, and a sync can make the library read-only mid-run.
+    const check = preflight(libraryID);
+    if (!check.ok) {
+      status = "failed";
+      error = `Cannot edit tags: ${check.reason}`;
+      break;
+    }
     try {
       if (!(await runTask(libraryID, task))) skippedTasks++;
       journal.completedTasks = i + 1;
-      await writeJournal(journal);
     } catch (e) {
       status = "failed";
       error = message(e);
@@ -305,6 +317,7 @@ export async function applyOps(opts: ApplyOptions): Promise<ApplyResult> {
 
   journal.status = status;
   journal.error = error;
+  let kept = true;
   try {
     journal.after = await captureStates(libraryID, names);
     await writeJournal(journal);
@@ -314,6 +327,16 @@ export async function applyOps(opts: ApplyOptions): Promise<ApplyResult> {
     status = "failed";
     error ??= message(e);
   }
+  if (journal.after && unchanged(journal.before, journal.after)) {
+    // Nothing to undo (every task skipped, cancelled or failed before any
+    // change): the journal would only hide the previous run from Undo.
+    try {
+      await deleteJournal(journal.id);
+      kept = false;
+    } catch (e) {
+      log("could not delete an empty journal", message(e));
+    }
+  }
   try {
     await pruneJournals();
   } catch (e) {
@@ -321,7 +344,7 @@ export async function applyOps(opts: ApplyOptions): Promise<ApplyResult> {
   }
 
   return {
-    journalId: journal.id,
+    journalId: kept ? journal.id : "",
     status,
     completedTasks: journal.completedTasks,
     totalTasks: tasks.length,
@@ -342,6 +365,19 @@ function sameState(a: TagState | undefined, b: TagState | undefined): boolean {
       .sort()
       .join(",");
   return key(a) === key(b);
+}
+
+/**
+ * Same items, types, colors and color positions for every name of `before`.
+ * (sameState ignores positions: they are list indexes, which shift when an
+ * unrelated tag's color changes, so they must not count as drift.)
+ */
+function unchanged(before: TagState[], after: TagState[]): boolean {
+  const afterByName = new Map(after.map((s) => [s.name, s]));
+  return before.every((s) => {
+    const a = afterByName.get(s.name);
+    return sameState(s, a) && s.color?.position === a?.color?.position;
+  });
 }
 
 export type UndoResult =

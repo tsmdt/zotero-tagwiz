@@ -27,10 +27,10 @@ In other words: its a plugin for cleaning up tags in bulk: change their case, re
 
 ## Usage
 
-Open TagWiz from the **Tools** menu, or right-click a collection and choose **TagWiz 🏷️**. The window lists the tags used in the selected collection, or all tags if a library is selected. Tick **Include subcollections** to count items in subcollections too.
+Open TagWiz from the **Tools** menu, or right-click a collection and choose **TagWiz 🏷️**. The window lists the tags used in the selected collection (including on its items' notes, attachments and annotations), or all tags if a library is selected. Tick **Include subcollections** to count items in subcollections too.
 
 > [!important]
-> **Every change applies to the whole library**, including items outside the currently selected collection (as well as items in the trash). The preview says how many items are affected and how many of them are outside the collection.
+> **Every change applies to the whole library**, including items outside the currently selected collection (as well as items in the trash). The preview says how many items are affected (items that only carry a merge target are not counted: they don't change) and how many of them are outside the collection.
 
 Pick a tab, select tags (the filter box helps with long lists), check the preview, untick anything you do not want, and press **Apply**.
 
@@ -41,7 +41,7 @@ Choose a style: lower case, UPPER CASE, Title Case, Sentence case, camelCase, Pa
 - **Keep ALL-CAPS and mixed-case words**: words like `NLP` or `iPhone` stay as they are in every style except UPPER CASE. `NLP methods` becomes `NLP Methods` in Title Case instead of `Nlp Methods`, `iPhone apps` becomes `iPhone Apps` instead of `Iphone Apps`, and `LLM Framework Studies` becomes `LLMframeworkStudies` in camelCase.
 - **Keep prefix**: type a prefix such as `TECH: `, `00_` or `Aa-`. In tags that start with exactly this text (case-sensitive, spaces count), the prefix stays as typed and only the rest changes: `TECH: 2026 deep learning` becomes `TECH: 2026DeepLearning` in camelCase. Leave it empty to convert whole tags.
 
-snake_case, kebab-case, camelCase and PascalCase split words at spaces, "-" and "\_" only, so other characters are kept: `C++ programming` becomes `c++_programming`, not `c_programming`.
+snake_case, kebab-case, camelCase and PascalCase split words at spaces, "-" and "\_" only, so other characters are kept: `C++ programming` becomes `c++_programming`, not `c_programming`. A leading or trailing "-" or "\_" stays too, so workflow tags keep sorting first: `_to read` becomes `_to_read` in snake_case and `_toRead` in camelCase.
 
 If two tags end up with the same name, the preview marks them as a merge.
 
@@ -67,7 +67,7 @@ Each group suggests a spelling to keep (the most used one); pick another one wit
 
 Before the first change of every run, TagWiz saves a snapshot of the affected tags in a `tagwiz` folder inside your Zotero data directory. **Undo Latest Edit** restores the tags from the most recent run, including which items carry them, their manual or automatic type and their colors.
 
-Keep in mind that **only the latest run can be undone**, and each run only once. If the tags were changed again afterwards (for example by a sync), TagWiz lists them and asks before overwriting; restoring anyway cannot itself be undone. TagWiz keeps the snapshots of the last 10 runs of each library.
+Keep in mind that **only the latest run can be undone**, and each run only once. If the tags were changed again afterwards (for example by a sync), TagWiz lists them and asks before overwriting; restoring anyway cannot itself be undone. TagWiz keeps the snapshots of the last 10 runs of each library. A run that changed nothing (for example, cancelled before its first change) keeps no snapshot, so the run before it can still be undone.
 
 Manual and automatic tags keep their type, and tag colors move with the tag. Changes sync like any other edit, so wait for a running sync to finish before editing tags, and keep a backup of your Zotero data before the first big run.
 

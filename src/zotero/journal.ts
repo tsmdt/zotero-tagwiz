@@ -51,6 +51,9 @@ async function migrateLegacyJournals(): Promise<void> {
   if (!(await IOUtils.exists(legacy))) return;
   await IOUtils.makeDirectory(dirPath(), { ignoreExisting: true });
   for (const path of (await IOUtils.getChildren(legacy)) as string[]) {
+    // Only snapshots: the folder name is generic enough that other files
+    // may be someone else's.
+    if (idOfFile(PathUtils.filename(path)) === undefined) continue;
     const target = PathUtils.join(dirPath(), PathUtils.filename(path));
     if (!(await IOUtils.exists(target))) await IOUtils.move(path, target);
   }
@@ -63,6 +66,21 @@ async function migrateLegacyJournals(): Promise<void> {
 
 function filePath(id: string): string {
   return PathUtils.join(dirPath(), `${id}.json`);
+}
+
+/**
+ * Journal IDs start with newJournalID's timestamp; nextJournalID and tests
+ * add "-suffixes". Anything else in the folder is not ours: a name like
+ * "notes" would sort after every timestamp and pass for the newest journal.
+ */
+const JOURNAL_ID =
+  /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(-[A-Za-z0-9]+)*$/;
+
+/** The journal ID of a file name, or undefined if it is not a journal file. */
+function idOfFile(filename: string): string | undefined {
+  if (!filename.endsWith(".json")) return undefined;
+  const id = filename.slice(0, -".json".length);
+  return JOURNAL_ID.test(id) ? id : undefined;
 }
 
 export function newJournalID(): string {
@@ -88,6 +106,13 @@ export async function writeJournal(journal: Journal): Promise<void> {
   await IOUtils.makeDirectory(dirPath(), { ignoreExisting: true });
   const path = filePath(journal.id);
   await IOUtils.writeJSON(path, journal, { tmpPath: path + TMP_SUFFIX });
+}
+
+/** Remove a journal, e.g. one of a run that changed nothing. */
+export async function deleteJournal(id: string): Promise<void> {
+  await IOUtils.remove(filePath(id), { ignoreAbsent: true });
+  libraryOf.delete(id);
+  parsed.delete(id);
 }
 
 function isTagState(value: any): boolean {
@@ -153,9 +178,8 @@ export async function listJournalIDs(): Promise<string[]> {
   if (!(await IOUtils.exists(dirPath()))) return [];
   const children: string[] = await IOUtils.getChildren(dirPath());
   return children
-    .map((p) => PathUtils.filename(p))
-    .filter((f) => f.endsWith(".json"))
-    .map((f) => f.slice(0, -".json".length))
+    .map((p) => idOfFile(PathUtils.filename(p)))
+    .filter((id): id is string => id !== undefined)
     .sort()
     .reverse();
 }
@@ -179,6 +203,7 @@ export async function pruneJournals(): Promise<void> {
     }
     await IOUtils.remove(filePath(id), { ignoreAbsent: true });
     libraryOf.delete(id);
+    parsed.delete(id);
   }
   if (!(await IOUtils.exists(dirPath()))) return;
   for (const path of (await IOUtils.getChildren(dirPath())) as string[]) {
@@ -189,7 +214,10 @@ export async function pruneJournals(): Promise<void> {
 }
 
 export interface UndoCandidate {
-  /** Latest journal of the library, unless that one was already undone. */
+  /**
+   * Latest journal of the library, unless that one was already undone.
+   * Shared with a cache: read it, don't modify it (use readJournal to edit).
+   */
   journal?: Journal;
   /**
    * IDs of unreadable journals newer than `journal`. Their library is
@@ -199,19 +227,49 @@ export interface UndoCandidate {
   unreadable: string[];
 }
 
+/** Recently parsed journals by ID, with their file's modification time. */
+const parsed = new Map<string, { modified: number; journal: Journal }>();
+const PARSED_KEEP = 4;
+
+/**
+ * readFile, but a file that has not changed since it was last parsed is not
+ * parsed again: the dialog asks for the latest journal on every reload, and
+ * journals can be megabytes.
+ */
+async function readFileCached(id: string): Promise<Journal> {
+  const modified = (await IOUtils.stat(filePath(id))).lastModified;
+  const hit = parsed.get(id);
+  if (hit && modified !== undefined && hit.modified === modified) {
+    return hit.journal;
+  }
+  const journal = await readFile(id);
+  libraryOf.set(id, journal.libraryID);
+  parsed.delete(id);
+  if (modified === undefined) return journal;
+  parsed.set(id, { modified, journal });
+  for (const old of parsed.keys()) {
+    if (parsed.size <= PARSED_KEEP) break;
+    parsed.delete(old);
+  }
+  return journal;
+}
+
 /** The library's latest journal, and the unreadable ones found before it. */
 export async function findUndoable(libraryID: number): Promise<UndoCandidate> {
   const unreadable: string[] = [];
   for (const id of await listJournalIDs()) {
+    // A journal already known to be another library's is not parsed again.
+    const library = libraryOf.get(id);
+    if (library !== undefined && library !== libraryID) continue;
     let journal: Journal;
     try {
-      journal = await readFile(id);
+      journal = await readFileCached(id);
     } catch (e) {
       Zotero.debug(`[TagWiz] unreadable journal ${id}: ${e}`);
       unreadable.push(id);
       continue;
     }
-    if (journal?.libraryID !== libraryID) continue;
+    if (journal.libraryID !== libraryID) continue;
     return {
       journal: journal.status === "undone" ? undefined : journal,
       unreadable,

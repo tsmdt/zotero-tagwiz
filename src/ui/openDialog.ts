@@ -10,6 +10,8 @@ const LOAD_POLL = 20;
 
 /** The dialog shown in addon.data.dialog, once it has loaded. */
 let current: TagWizDialog | undefined;
+/** Selection of a TagWiz click while the window was still loading. */
+let pending: DialogParams | undefined;
 
 /**
  * Open the TagWiz window for the library/collection currently selected
@@ -44,7 +46,17 @@ async function open(): Promise<void> {
   const existing = addon.data.dialog;
   if (existing && isWindowAlive(existing)) {
     existing.focus();
-    if (params) await current?.setScope(params);
+    if (!params) return;
+    if (!current) {
+      // Still loading: switch once it has.
+      pending = params;
+    } else if (!(await current.setScope(params))) {
+      Services.prompt.alert(
+        existing as any,
+        getString("dialog-title"),
+        getString("dialog-busy"),
+      );
+    }
     return;
   }
 
@@ -58,6 +70,7 @@ async function open(): Promise<void> {
   }
 
   current = undefined;
+  pending = undefined;
   const win = Services.ww.openWindow(
     Zotero.getMainWindow() as any,
     DIALOG_URL,
@@ -67,11 +80,23 @@ async function open(): Promise<void> {
   ) as unknown as Window;
   addon.data.dialog = win;
 
-  await waitForRoot(win);
+  try {
+    await waitForRoot(win);
+  } catch (e) {
+    // Don't keep focusing a window that never loaded on later clicks.
+    if (isWindowAlive(win)) win.close();
+    if (addon.data.dialog === win) addon.data.dialog = undefined;
+    throw e;
+  }
 
   const dialog = new TagWizDialog(win, params);
   current = dialog;
   await dialog.init();
+  if (pending) {
+    const next = pending;
+    pending = undefined;
+    await dialog.setScope(next);
+  }
 }
 
 /**

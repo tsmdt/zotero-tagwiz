@@ -11,6 +11,19 @@ export type Task =
   | { kind: "retype"; name: string; toType: TagType }
   | { kind: "remove"; name: string; types: TagType[] | "all" };
 
+/** A plan toTasks cannot execute as requested; `code` is for the UI's message. */
+export class TaskError extends Error {
+  constructor(
+    readonly code: "two-targets" | "split-types",
+    /** The tag name concerned. */
+    readonly tagName: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "TaskError";
+  }
+}
+
 export function taskNames(task: Task): string[] {
   return task.kind === "rename" ? [task.from, task.to] : [task.name];
 }
@@ -45,7 +58,9 @@ export function toTasks(
       const to = cleanName(op.to);
       const entry = renames.get(op.from.name);
       if (entry && entry.to !== to) {
-        throw new Error(
+        throw new TaskError(
+          "two-targets",
+          op.from.name,
           `Tag "${op.from.name}" is renamed to both "${entry.to}" and "${to}"`,
         );
       }
@@ -65,7 +80,9 @@ export function toTasks(
   for (const [from, { to, types }] of renames) {
     const all = typesByName.get(from) ?? types;
     if ([...all].some((t) => !types.has(t))) {
-      throw new Error(
+      throw new TaskError(
+        "split-types",
+        from,
         `Renaming "${from}" must include all of its types (manual and automatic)`,
       );
     }

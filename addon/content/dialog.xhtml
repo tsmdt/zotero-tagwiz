@@ -4,6 +4,12 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en">
   <head>
     <meta charset="utf-8" />
+    <!-- The page runs no scripts of its own: the plugin builds it from outside.
+         Tag names come from other group members, so no markup in them may ever run. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="script-src 'none'; object-src 'none'"
+    />
     <title>TagWiz</title>
   </head>
   <body>

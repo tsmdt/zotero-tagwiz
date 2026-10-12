@@ -80,21 +80,38 @@ export function getColorOf(
  */
 export async function tagIDsOf(names: readonly string[]): Promise<number[]> {
   const ids = new Set<number>();
-  const spellings = new Set<string>();
-  for (const name of names) {
-    const known = Zotero.Tags.getID(name);
-    if (known) ids.add(known);
-    spellings.add(name);
-    spellings.add(name.normalize("NFD"));
-  }
-  for (const part of chunks([...spellings], CHUNK)) {
-    const rows = await query(
-      `SELECT tagID AS id FROM tags WHERE name IN (${placeholders(part.length)})`,
-      part,
-    );
-    for (const r of rows) ids.add(r.id as number);
+  for (const list of (await tagIDsByName(names)).values()) {
+    for (const id of list) ids.add(id);
   }
   return [...ids];
+}
+
+/** tagIDsOf for each name separately. */
+async function tagIDsByName(
+  names: readonly string[],
+): Promise<Map<string, number[]>> {
+  const ids = new Map<string, Set<number>>();
+  /** Spelling looked up in SQL -> the name it belongs to. */
+  const nameOf = new Map<string, string>();
+  for (const name of names) {
+    const set = ids.get(name) ?? new Set<number>();
+    const known = Zotero.Tags.getID(name);
+    if (known) set.add(known);
+    ids.set(name, set);
+    nameOf.set(name, name);
+    nameOf.set(name.normalize("NFD"), name);
+  }
+  for (const part of chunks([...nameOf.keys()], CHUNK)) {
+    const rows = await query(
+      `SELECT tagID AS id, name AS name FROM tags WHERE name IN (${placeholders(part.length)})`,
+      part,
+    );
+    for (const r of rows) {
+      const name = nameOf.get(r.name as string);
+      if (name !== undefined) ids.get(name)!.add(r.id as number);
+    }
+  }
+  return new Map([...ids].map(([name, set]) => [name, [...set]]));
 }
 
 /** Types (0 manual / 1 automatic) under which `name` is used in the library. */
@@ -141,42 +158,86 @@ export async function itemsWithTag(
   return [...types].map(([id, type]) => ({ id, type }));
 }
 
-/** Snapshot of the given tag names: membership, types and colors. */
+/**
+ * Snapshot of the given tag names: membership, types and colors. Same result
+ * as itemsWithTag per name, in a few chunked queries instead of two per name.
+ */
 export async function captureStates(
   libraryID: number,
   names: readonly string[],
 ): Promise<TagState[]> {
+  const idsByName = await tagIDsByName(names);
+  const nameOfID = new Map<number, string>();
+  for (const [name, ids] of idsByName) {
+    for (const id of ids) nameOfID.set(id, name);
+  }
+  /** name -> itemID -> type (manual if any stored form is manual). */
+  const typesByName = new Map<string, Map<number, TagType>>();
+  for (const part of chunks([...nameOfID.keys()], CHUNK)) {
+    const rows = await query(
+      "SELECT it.itemID AS itemID, it.type AS type, it.tagID AS tagID " +
+        "FROM itemTags it JOIN items i USING (itemID) " +
+        `WHERE i.libraryID=? AND it.tagID IN (${placeholders(part.length)})`,
+      [libraryID, ...part],
+    );
+    for (const r of rows) {
+      const name = nameOfID.get(r.tagID as number)!;
+      const types = typesByName.get(name) ?? new Map<number, TagType>();
+      const id = r.itemID as number;
+      const type: TagType = r.type ? 1 : 0;
+      types.set(id, Math.min(types.get(id) ?? type, type) as TagType);
+      typesByName.set(name, types);
+    }
+  }
+
   const colors = getColorList(libraryID);
-  const states: TagState[] = [];
-  for (const name of names) {
+  return names.map((name) => {
     const position = colors.findIndex((x) => x.name === name);
-    states.push({
+    return {
       name,
-      items: await itemsWithTag(libraryID, name),
+      items: [...(typesByName.get(name) ?? [])]
+        .sort((a, b) => a[0] - b[0])
+        .map(([id, type]) => ({ id, type })),
       color:
         position < 0 ? undefined : { color: colors[position].color, position },
-    });
-  }
-  return states;
+    };
+  });
 }
 
 /**
- * SQL selecting the collection IDs in scope (one `?` parameter: the root
- * collection). Used as `IN (...)` subquery so the outer statement can start
- * with SELECT. Trashed subcollections are skipped.
+ * SQL selecting the items in scope (one `?` parameter: the root collection):
+ * the non-trashed top-level items of the collection (and its non-trashed
+ * subcollections), plus their child notes and attachments and the
+ * annotations of those attachments. Zotero only puts top-level items into
+ * collections, but its tag selector shows the children's tags too.
+ * Used as `IN (...)` subquery so the outer statement can start with SELECT.
+ * Children trashed on their own are filtered by the callers.
  */
-function scopeIdsSql(scope: Scope): string {
-  if (!scope.includeSubcollections) {
-    return "SELECT collectionID FROM collections WHERE collectionID=?";
-  }
+function scopeItemsSql(scope: Scope): string {
+  const cols = scope.includeSubcollections
+    ? "WITH RECURSIVE scopeCols(id) AS (" +
+      "SELECT collectionID FROM collections WHERE collectionID=? " +
+      "AND collectionID NOT IN (SELECT collectionID FROM deletedCollections) " +
+      "UNION ALL SELECT c.collectionID FROM collections c " +
+      "JOIN scopeCols ON c.parentCollectionID=scopeCols.id " +
+      "WHERE c.collectionID NOT IN (SELECT collectionID FROM deletedCollections)" +
+      "), "
+    : "WITH scopeCols(id) AS (" +
+      "SELECT collectionID FROM collections WHERE collectionID=?), ";
   return (
-    "WITH RECURSIVE cols(id) AS (" +
-    "SELECT collectionID FROM collections WHERE collectionID=? " +
-    "AND collectionID NOT IN (SELECT collectionID FROM deletedCollections) " +
-    "UNION ALL SELECT c.collectionID FROM collections c " +
-    "JOIN cols ON c.parentCollectionID=cols.id " +
-    "WHERE c.collectionID NOT IN (SELECT collectionID FROM deletedCollections)" +
-    ") SELECT id FROM cols"
+    cols +
+    "scopeTop(id) AS (SELECT itemID FROM collectionItems " +
+    "WHERE collectionID IN (SELECT id FROM scopeCols) " +
+    "AND itemID NOT IN (SELECT itemID FROM deletedItems)), " +
+    "scopeAtt(id) AS (SELECT itemID FROM itemAttachments " +
+    "WHERE parentItemID IN (SELECT id FROM scopeTop)) " +
+    "SELECT id FROM scopeTop " +
+    "UNION SELECT id FROM scopeAtt " +
+    "UNION SELECT itemID FROM itemNotes " +
+    "WHERE parentItemID IN (SELECT id FROM scopeTop) " +
+    "UNION SELECT itemID FROM itemAnnotations " +
+    "WHERE parentItemID IN (SELECT id FROM scopeTop) " +
+    "OR parentItemID IN (SELECT id FROM scopeAtt)"
   );
 }
 
@@ -206,8 +267,7 @@ export async function loadTags(
     const rows = await query(
       "SELECT t.name AS name, it.type AS type, COUNT(DISTINCT it.itemID) AS n " +
         "FROM itemTags it JOIN tags t USING (tagID) " +
-        "JOIN collectionItems ci USING (itemID) " +
-        `WHERE ci.collectionID IN (${scopeIdsSql(scope)}) ` +
+        `WHERE it.itemID IN (${scopeItemsSql(scope)}) ` +
         "AND it.itemID NOT IN (SELECT itemID FROM deletedItems) " +
         "GROUP BY t.tagID, it.type",
       [scope.collectionID],
@@ -273,9 +333,9 @@ export async function measureImpact(
 
   const inside = new Set<number>();
   const rows = await query(
-    "SELECT DISTINCT ci.itemID AS itemID FROM collectionItems ci " +
-      `WHERE ci.collectionID IN (${scopeIdsSql(scope)}) ` +
-      "AND ci.itemID NOT IN (SELECT itemID FROM deletedItems)",
+    "SELECT itemID AS itemID FROM items " +
+      `WHERE itemID IN (${scopeItemsSql(scope)}) ` +
+      "AND itemID NOT IN (SELECT itemID FROM deletedItems)",
     [scope.collectionID],
   );
   for (const r of rows) inside.add(r.itemID as number);

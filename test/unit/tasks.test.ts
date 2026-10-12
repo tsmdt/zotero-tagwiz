@@ -1,5 +1,5 @@
 import { assert } from "chai";
-import { affectedNames, toTasks } from "../../src/core/tasks";
+import { affectedNames, TaskError, toTasks } from "../../src/core/tasks";
 import type { TagRef } from "../../src/core/types";
 
 const t = (name: string, type: 0 | 1 = 0, itemCount = 1): TagRef => ({
@@ -25,6 +25,7 @@ describe("toTasks", function () {
     const all = [t("Foo", 0), t("Foo", 1)];
     assert.throws(
       () => toTasks([{ kind: "rename", from: all[0], to: "foo" }], all),
+      TaskError,
       /all of its types/,
     );
   });
@@ -40,6 +41,7 @@ describe("toTasks", function () {
           ],
           all,
         ),
+      TaskError,
       /both/,
     );
   });

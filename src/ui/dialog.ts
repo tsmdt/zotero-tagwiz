@@ -13,7 +13,7 @@ import {
   buildUnifyPlan,
   includedOps,
 } from "../core/plan";
-import { toTasks } from "../core/tasks";
+import { TaskError, toTasks } from "../core/tasks";
 import type {
   CaseOptions,
   CaseStyle,
@@ -153,6 +153,15 @@ const byName = (a: string, b: string) =>
 function opName(op: Op): string {
   return op.kind === "rename" ? op.from.name : op.tag.name;
 }
+
+/**
+ * Names whose items an edit changes. A rename's target is not one of them:
+ * items that already carry only the target keep it unchanged.
+ */
+function editedNames(ops: readonly Op[]): string[] {
+  return [...new Set(ops.map(opName))];
+}
+
 function opKey(op: Op): string {
   const type = op.kind === "rename" ? op.from.type : op.tag.type;
   return `${op.kind}\u0000${opName(op)}\u0000${op.kind === "rename" ? op.to : ""}\u0000${op.kind === "retype" ? type : ""}`;
@@ -209,6 +218,8 @@ export class TagWizDialog {
   private impactTimer?: number;
   private filterTimer?: number;
   private reloadTimer?: number;
+  /** Bumped by every loadData; an older, slower one must not overwrite it. */
+  private loadSeq = 0;
   private canUndo = false;
 
   private headerEl!: HTMLElement;
@@ -351,7 +362,8 @@ export class TagWizDialog {
   private async reload() {
     if (!this.alive || this.busy) return;
     try {
-      await this.loadData();
+      // Superseded by a newer load (e.g. setScope meanwhile): that one draws.
+      if (!(await this.loadData())) return;
     } catch (e) {
       Zotero.logError(e as Error);
       this.setStatus(
@@ -365,7 +377,21 @@ export class TagWizDialog {
     const active = this.doc.activeElement as HTMLInputElement | null;
     const focusID = active?.id;
     const caret = focusID ? active.selectionStart : null;
+    // Redrawing also resets the lists' scroll positions, e.g. when a sync
+    // changes a tag while the user is far down the list.
+    const scrolls = [this.leftEl, this.previewEl].map((pane) => {
+      const box = pane.querySelector(".tw-scroll-box");
+      return box && { top: box.scrollTop, left: box.scrollLeft };
+    });
     this.renderAll();
+    [this.leftEl, this.previewEl].forEach((pane, i) => {
+      const box = pane.querySelector(".tw-scroll-box");
+      const scroll = scrolls[i];
+      if (box && scroll) {
+        box.scrollTop = scroll.top;
+        box.scrollLeft = scroll.left;
+      }
+    });
     const again = focusID
       ? (this.doc.getElementById(focusID) as HTMLInputElement | null)
       : null;
@@ -377,13 +403,23 @@ export class TagWizDialog {
     }
   }
 
-  private async loadData() {
-    this.allTags = await loadTags(this.libraryID);
-    const scoped = this.scope ? await loadTags(this.libraryID, this.scope) : [];
-    const listed = this.scope ? scoped : this.allTags;
+  /**
+   * Read tags (and undo state) for the current library and scope. Returns
+   * false, changing nothing, if another loadData started meanwhile: loads can
+   * overlap (Notifier, subcollection toggle, setScope), and a slower older
+   * one would otherwise overwrite newer data, e.g. of another library.
+   */
+  private async loadData(): Promise<boolean> {
+    const seq = ++this.loadSeq;
+    const { libraryID, scope } = this;
+    const allTags = await loadTags(libraryID);
+    const scoped = scope ? await loadTags(libraryID, scope) : [];
+    const canUndo = !!(await latestUndoable(libraryID));
+    if (seq !== this.loadSeq) return false;
+    const listed = scope ? scoped : allTags;
 
     const refsByName = new Map<string, TagRef[]>();
-    for (const tag of this.allTags) {
+    for (const tag of allTags) {
       const list = refsByName.get(tag.name) ?? [];
       list.push(tag);
       refsByName.set(tag.name, list);
@@ -396,13 +432,14 @@ export class TagWizDialog {
       );
     }
     const names = [...new Set(listed.map((t) => t.name))].sort(byName);
+    this.allTags = allTags;
     this.rows = names.map((name) => {
       const refs = refsByName.get(name) ?? [];
       return {
         name,
         refs,
         items: refs.reduce((n, r) => n + r.itemCount, 0),
-        scopeItems: this.scope ? scopeByName.get(name) : undefined,
+        scopeItems: scope ? scopeByName.get(name) : undefined,
         type: tagKind(refs),
         color: refs.find((r) => r.color)?.color,
       };
@@ -412,9 +449,10 @@ export class TagWizDialog {
     for (const name of [...this.selected]) {
       if (!existing.has(name)) this.selected.delete(name);
     }
-    this.canUndo = !!(await latestUndoable(this.libraryID));
+    this.canUndo = canUndo;
     this.fuzzy = undefined;
     this.recomputeGroups();
+    return true;
   }
 
   private selectedRefs(): TagRef[] {
@@ -524,13 +562,7 @@ export class TagWizDialog {
     if (!ops.length) {
       this.impactText = "";
     } else {
-      const names = [
-        ...new Set(
-          ops.flatMap((op) =>
-            op.kind === "rename" ? [op.from.name, op.to] : [op.tag.name],
-          ),
-        ),
-      ];
+      const names = editedNames(ops);
       let impact: { total: number; outsideScope: number };
       try {
         impact = await measureImpact(this.libraryID, names, this.scope);
@@ -694,8 +726,13 @@ export class TagWizDialog {
         type: "button",
         class: "tw-select-all",
         onclick: () => {
-          // Only what the user can see: not rows beyond MAX_ROWS.
-          for (const name of this.shownNames) this.selected.add(name);
+          // Only what the user can see: not rows beyond MAX_ROWS. Go by the
+          // current filter, not the drawn rows: a filter typed within the
+          // last FILTER_DELAY ms is not drawn yet.
+          this.win.clearTimeout(this.filterTimer);
+          for (const row of this.visibleRows().slice(0, MAX_ROWS)) {
+            this.selected.add(row.name);
+          }
           this.fillRows(tbody, updateCount, more);
           this.selectionChanged();
         },
@@ -709,6 +746,7 @@ export class TagWizDialog {
         type: "button",
         class: "tw-select-none",
         onclick: () => {
+          this.win.clearTimeout(this.filterTimer);
           this.selected.clear();
           this.fillRows(tbody, updateCount, more);
           this.selectionChanged();
@@ -1152,7 +1190,8 @@ export class TagWizDialog {
         h(doc, "div", { class: "tw-list-notice" }, getString("dup-none")),
       );
     }
-    for (const group of this.groups) {
+    // Like the preview, draw at most MAX_ROWS; the plan has every ticked group.
+    for (const group of this.groups.slice(0, MAX_ROWS)) {
       const key = groupKey(group);
       const canonical = this.chosen.get(key) ?? group.canonical;
       const on = h(doc, "input", {
@@ -1207,6 +1246,18 @@ export class TagWizDialog {
         );
       }
       scroll.appendChild(box);
+    }
+    if (this.groups.length > MAX_ROWS) {
+      scroll.appendChild(
+        h(
+          doc,
+          "div",
+          { class: "tw-hint tw-list-notice" },
+          getString("dup-groups-more", {
+            args: { shown: MAX_ROWS, total: this.groups.length },
+          }),
+        ),
+      );
     }
 
     // Suggest-only: never part of the plan unless the user sends them to Unify.
@@ -1589,9 +1640,9 @@ export class TagWizDialog {
       // (e.g. a new tag this would now merge into): never apply anything
       // other than what the user reviewed.
       const shown = this.planSignature(this.plan);
-      await this.loadData();
+      const loaded = await this.loadData();
       const fresh = this.computePlan();
-      if (this.planSignature(fresh) !== shown) {
+      if (!loaded || this.planSignature(fresh) !== shown) {
         stale = true;
         this.setStatus(getString("status-plan-changed"), "error");
         return;
@@ -1600,13 +1651,7 @@ export class TagWizDialog {
       const ops = includedOps(this.plan);
       // Throws for plans that cannot run as shown, before anything changes.
       const tasks = toTasks(ops, this.allTags);
-      const names = [
-        ...new Set(
-          ops.flatMap((op) =>
-            op.kind === "rename" ? [op.from.name, op.to] : [op.tag.name],
-          ),
-        ),
-      ];
+      const names = editedNames(ops);
       const impact = await measureImpact(this.libraryID, names, this.scope);
       const removing = ops.every((op) => op.kind === "remove");
       let text = removing
@@ -1786,5 +1831,11 @@ function swatch(doc: Document, color: string): HTMLElement {
 }
 
 function errorText(e: unknown): string {
+  if (e instanceof TaskError) {
+    return getString(
+      e.code === "two-targets" ? "error-two-targets" : "error-split-types",
+      { args: { name: e.tagName } },
+    );
+  }
   return e instanceof Error ? e.message : String(e);
 }

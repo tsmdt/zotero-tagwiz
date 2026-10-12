@@ -43,9 +43,22 @@ export function splitWords(input: string): string[] {
     .filter((w) => w.length > 0);
 }
 
+/**
+ * Locale-independent lower case. "İ" (U+0130) would otherwise become "i" plus
+ * a combining dot above, which renders as a stray dot.
+ */
+export function lower(text: string): string {
+  return text.replace(/\u0130/gu, "I").toLowerCase();
+}
+
+/** Leading characters that are neither letters nor digits ("#", "+", "'"). */
+const LEADING_SYMBOLS = /^[^\p{L}\p{N}]*/u;
+
+/** Upper-case the first letter or digit, lower-case the rest: "#todo" -> "#Todo". */
 function capitalize(word: string): string {
-  const [first = "", ...rest] = Array.from(word);
-  return first.toUpperCase() + rest.join("").toLowerCase();
+  const symbols = LEADING_SYMBOLS.exec(word)![0];
+  const [first = "", ...rest] = Array.from(word.slice(symbols.length));
+  return symbols + first.toUpperCase() + lower(rest.join(""));
 }
 
 function isAcronym(word: string): boolean {
@@ -57,11 +70,19 @@ function isAcronym(word: string): boolean {
   );
 }
 
-/** Mixed case with a capital after the first letter: "iPhone", "McDonald's", "LaTeX". */
+/**
+ * Mixed case with a capital after the first letter: "iPhone", "McDonald's",
+ * "LaTeX". Leading symbols don't count as the first letter: "#ToRead" is a
+ * capitalized word with a symbol, not mixed case.
+ */
 function isMixedCase(word: string): boolean {
-  const rest = Array.from(word).slice(1).join("");
-  return /\p{Lu}/u.test(rest) && /\p{Ll}/u.test(word);
+  const body = word.replace(LEADING_SYMBOLS, "");
+  const rest = Array.from(body).slice(1).join("");
+  return /\p{Lu}/u.test(rest) && /\p{Ll}/u.test(body);
 }
+
+/** A word with a letter or digit, unlike "#" or "+" on their own. */
+const hasWordChar = (word: string) => /[\p{L}\p{N}]/u.test(word);
 
 function convertBody(body: string, opts: CaseOptions): string {
   const keepAcronyms = opts.keepAcronyms ?? true;
@@ -69,21 +90,19 @@ function convertBody(body: string, opts: CaseOptions): string {
     keepAcronyms && (isAcronym(word) || isMixedCase(word));
   switch (opts.style) {
     case "lower":
-      return body.replace(WORD_RE, (word) =>
-        keep(word) ? word : word.toLowerCase(),
-      );
+      return body.replace(WORD_RE, (word) => (keep(word) ? word : lower(word)));
     case "upper":
       return body.toUpperCase();
     case "title": {
       const small = new Set(
-        (opts.smallWords ?? DEFAULT_SMALL_WORDS).map((w) => w.toLowerCase()),
+        (opts.smallWords ?? DEFAULT_SMALL_WORDS).map((w) => lower(w)),
       );
       let index = 0;
       return body.replace(WORD_RE, (word) => {
         const first = index++ === 0;
         if (keep(word)) return word;
-        const lower = word.toLowerCase();
-        return !first && small.has(lower) ? lower : capitalize(word);
+        const lowered = lower(word);
+        return !first && small.has(lowered) ? lowered : capitalize(word);
       });
     }
     case "sentence": {
@@ -91,27 +110,54 @@ function convertBody(body: string, opts: CaseOptions): string {
       return body.replace(WORD_RE, (word) => {
         const first = index++ === 0;
         if (keep(word)) return word;
-        return first ? capitalize(word) : word.toLowerCase();
+        return first ? capitalize(word) : lower(word);
       });
     }
+    case "camel":
+    case "pascal":
+    case "snake":
+    case "kebab": {
+      // Leading/trailing "_" or "-" mark a tag ("_todo" sorts first in
+      // Zotero's tag selector): keep them instead of reading them as
+      // separators. A tag of separators only has no words: "".
+      const [, lead, core, trail] = /^([_-]*)(.*?)([_-]*)$/su.exec(body)!;
+      if (!/[^\s_-]/u.test(core)) return "";
+      return lead + convertIdentifier(core, opts, keep) + trail;
+    }
+  }
+}
+
+function convertIdentifier(
+  body: string,
+  opts: CaseOptions,
+  keep: (word: string) => boolean,
+): string {
+  const keepAcronyms = opts.keepAcronyms ?? true;
+  switch (opts.style) {
     case "camel":
     case "pascal": {
       // Already a single camel/Pascal identifier: leave it alone. Re-splitting
       // is ambiguous (e.g. "aBCD") and would make the conversion non-idempotent.
       // A camel identifier may start with a kept acronym ("LLMframework").
+      // Leading symbols don't decide the case: "#toRead" is camel.
+      // This holds without keepAcronyms too: PascalCase "ABCD" (from
+      // "a b c d") cannot be told apart from an acronym, so "HELLO" stays.
+      const start = body.replace(LEADING_SYMBOLS, "");
       const isIdentifier = !SEPARATORS.test(body);
       const startsRight =
         opts.style === "camel"
-          ? /^\p{Ll}/u.test(body) || (keepAcronyms && /^\p{Lu}{2}/u.test(body))
-          : /^\p{Lu}/u.test(body);
+          ? /^\p{Ll}/u.test(start) ||
+            (keepAcronyms && /^\p{Lu}{2}/u.test(start))
+          : /^\p{Lu}/u.test(start);
       if (isIdentifier && startsRight) return body;
       // Kept acronyms don't count as the leading camelCase word:
-      // "LLM Framework Studies" -> "LLMframeworkStudies".
+      // "LLM Framework Studies" -> "LLMframeworkStudies". Neither do words of
+      // symbols only: "# to read" -> "#toRead".
       let lowerNext = opts.style === "camel";
       return splitWords(body)
         .map((w) => {
-          if (keep(w)) return w;
-          const out = lowerNext ? w.toLowerCase() : capitalize(w);
+          if (keep(w) || !hasWordChar(w)) return w;
+          const out = lowerNext ? lower(w) : capitalize(w);
           lowerNext = false;
           return out;
         })
@@ -119,11 +165,11 @@ function convertBody(body: string, opts: CaseOptions): string {
     }
     case "snake":
       return splitWords(body)
-        .map((w) => (keep(w) ? w : w.toLowerCase()))
+        .map((w) => (keep(w) ? w : lower(w)))
         .join("_");
-    case "kebab":
+    default:
       return splitWords(body)
-        .map((w) => (keep(w) ? w : w.toLowerCase()))
+        .map((w) => (keep(w) ? w : lower(w)))
         .join("-");
   }
 }

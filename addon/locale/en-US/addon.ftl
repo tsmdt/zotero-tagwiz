@@ -3,6 +3,7 @@ menuitem-tools-label = TagWiz 🏷️
 
 dialog-title = TagWiz 🏷️
 dialog-no-library = Select a library or collection first.
+dialog-busy = TagWiz is still applying changes. Open it again from there once it has finished.
 
 scope-collection = Tags used in “{ $collection }”
 scope-library = Showing all tags in “{ $library }”
@@ -51,6 +52,7 @@ dup-case = Ignoring case
 dup-normalized = Ignoring case, accents, spaces, “-” and “_”
 dup-groups-title = Duplicate groups
 dup-none = No duplicates found among the shown tags.
+dup-groups-more = Showing the first { $shown } of { $total } groups. All ticked groups are merged, also those not shown.
 dup-merge-group = Merge this group
 dup-keep = Keep
 dup-fuzzy-title = Possible typos and plurals (review each one yourself)
@@ -139,3 +141,5 @@ undo-not-done = The last run was not undone.
 error-read-only = This library is read-only.
 error-no-library = The library no longer exists.
 error-tags-not-loaded = Zotero has not finished loading tags.
+error-two-targets = “{ $name }” cannot be renamed to two different names at once.
+error-split-types = “{ $name }” is used both as a manual and an automatic tag; renaming it must include both.

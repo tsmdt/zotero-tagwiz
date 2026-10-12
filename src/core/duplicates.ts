@@ -95,7 +95,10 @@ export function withinOneEdit(a: string, b: string): boolean {
  * Suggest-only candidates: single typos and simple plurals among tags that are
  * NOT already exact/case/normalized duplicates. Names must be >= 5 chars and
  * share a first character to keep false positives down. A name used as manual
- * and automatic tag counts once. Most-used pairs come first.
+ * and automatic tag counts once, and so do names that are duplicates of each
+ * other ("Neuron", "neuron"): the most-used one stands for them, as the
+ * duplicate groups above the suggestions merge them anyway. Most-used pairs
+ * come first.
  *
  * Runs in O(n · length²) instead of comparing all pairs: keys one edit apart
  * either share a "deleted at i" variant (substitution at i), or one key is
@@ -107,11 +110,20 @@ export function findFuzzyPairs(tags: readonly TagRef[]): FuzzyPair[] {
     const seen = byName.get(tag.name);
     if (!seen || tag.itemCount > seen.itemCount) byName.set(tag.name, tag);
   }
-  const items = [...byName.values()]
-    .map((tag) => {
-      const key = duplicateKey(tag.name, "normalized");
-      return { tag, key, chars: Array.from(key) };
-    })
+  const byNormalized = new Map<string, TagRef>();
+  for (const tag of byName.values()) {
+    const key = duplicateKey(tag.name, "normalized");
+    const seen = byNormalized.get(key);
+    if (
+      !seen ||
+      tag.itemCount > seen.itemCount ||
+      (tag.itemCount === seen.itemCount && tag.name < seen.name)
+    ) {
+      byNormalized.set(key, tag);
+    }
+  }
+  const items = [...byNormalized]
+    .map(([key, tag]) => ({ tag, key, chars: Array.from(key) }))
     .filter((x) => x.key.length >= 5);
   type Item = (typeof items)[number];
 

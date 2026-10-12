@@ -102,9 +102,44 @@ describe("convertCase", function () {
   });
 
   it("is locale independent (Turkish dotted I)", function () {
-    // JS toLowerCase is locale-independent: İ -> i + combining dot, never ı.
     assert.equal(c("TITLE", "lower", { keepAcronyms: false }), "title");
     assert.notInclude(c("TITLE", "lower", { keepAcronyms: false }), "ı");
+    // İ -> plain i, not i + combining dot above (U+0307).
+    assert.equal(c("İstanbul Studies", "lower"), "istanbul studies");
+    assert.equal(
+      c("Visit İzmir", "sentence", { keepAcronyms: false }),
+      "Visit izmir",
+    );
+    assert.equal(c("İstanbul Studies", "snake"), "istanbul_studies");
+  });
+
+  it("keeps a leading or trailing '_' / '-' in identifier styles", function () {
+    const cases: Array<[string, CaseStyle, string]> = [
+      ["_todo", "snake", "_todo"],
+      ["_todo", "kebab", "_todo"],
+      ["_todo", "camel", "_todo"],
+      ["_todo", "pascal", "_Todo"],
+      ["_to read", "snake", "_to_read"],
+      ["_to read", "kebab", "_to-read"],
+      ["_to read", "camel", "_toRead"],
+      ["_to read", "pascal", "_ToRead"],
+      ["__inbox", "snake", "__inbox"],
+      ["-reviewed", "kebab", "-reviewed"],
+      ["_fooBar", "camel", "_fooBar"],
+      ["draft_", "pascal", "Draft_"],
+    ];
+    for (const [name, style, expected] of cases) {
+      assert.equal(c(name, style), expected, `${style}: ${name}`);
+    }
+  });
+
+  it("does not count words of symbols only as the first camel word", function () {
+    assert.equal(c("# to read", "camel"), "#toRead");
+    assert.equal(c("# to read", "pascal"), "#ToRead");
+    assert.equal(c("+ deep learning", "camel"), "+deepLearning");
+    assert.equal(c("#toread", "pascal"), "#Toread");
+    // Digits still do, like in other camelCase converters.
+    assert.equal(c("1 important thing", "camel"), "1ImportantThing");
   });
 
   it("keeps a user-given prefix unchanged", function () {
@@ -164,6 +199,15 @@ describe("convertCase", function () {
         "McDonald's history",
         "C++ programming",
         "R&D funding",
+        "_todo",
+        "_to read",
+        "-reviewed",
+        "# to read",
+        "+ deep learning",
+        "! urgent stuff",
+        "#toread",
+        "1 important thing",
+        "İstanbul Studies",
       ]) {
         for (const keepAcronyms of [true, false]) {
           const once = c(name, style, { keepAcronyms });
