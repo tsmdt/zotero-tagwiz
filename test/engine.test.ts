@@ -324,6 +324,8 @@ describe("engine (in Zotero)", function () {
       assert.equal(result.status, "done");
       assert.equal(result.completedTasks, 1);
       assert.equal(result.skippedTasks, 1);
+      // Nothing changed, so no journal is kept (see "a run that changed nothing").
+      assert.equal(result.journalId, "");
     });
   });
 
@@ -804,6 +806,95 @@ describe("engine (in Zotero)", function () {
       },
     );
 
+    // it, not itx: itx would turn this.skip() into a failure.
+    it("writes the journal a constant number of times, not once per task", async function () {
+      const desc = Object.getOwnPropertyDescriptor(IOUtils, "writeJSON");
+      if (!desc?.writable) this.skip();
+      const ops: Op[] = [];
+      for (let i = 0; i < 6; i++) {
+        const x = name("wc");
+        await makeItem([x]);
+        ops.push({ kind: "rename", from: await ref(x), to: name("wd") });
+      }
+      const allTags = await loadTags(libraryID);
+      const original = IOUtils.writeJSON;
+      let writes = 0;
+      (IOUtils as any).writeJSON = function (...args: unknown[]) {
+        writes++;
+        return (original as any).apply(IOUtils, args);
+      };
+      try {
+        const result = await applyOps({ libraryID, allTags, ops });
+        assert.equal(result.completedTasks, 6);
+      } finally {
+        (IOUtils as any).writeJSON = original;
+      }
+      // Once before the first task, once with the after snapshot.
+      assert.equal(writes, 2);
+    });
+
+    itx(
+      "a run that changed nothing keeps the previous run undoable",
+      async function () {
+        const [x, y, gone] = [name("na"), name("nb"), name("ng")];
+        await makeItem([x]);
+        const first = await rename(x, y);
+        assert.notEqual(first.journalId, "");
+
+        const goneItem = await makeItem([gone]);
+        const allTags = await loadTags(libraryID);
+        const from = await ref(gone);
+        goneItem.removeTag(gone);
+        await goneItem.saveTx();
+        const second = await applyOps({
+          libraryID,
+          allTags,
+          ops: [{ kind: "rename", from, to: name("nh") }],
+        });
+
+        assert.equal(second.skippedTasks, 1);
+        assert.equal(second.journalId, "");
+        assert.equal((await latestUndoable(libraryID))?.id, first.journalId);
+      },
+    );
+
+    itx(
+      "ignores files in the journal folder that are not journals",
+      async function () {
+        const dir = PathUtils.join(Zotero.DataDirectory.dir, "tagwiz");
+        const legacyDir = PathUtils.join(
+          Zotero.DataDirectory.dir,
+          "tagcleaner",
+        );
+        const foreign = PathUtils.join(dir, "notes.json");
+        const legacyForeign = PathUtils.join(legacyDir, "settings.json");
+        await IOUtils.makeDirectory(dir, { ignoreExisting: true });
+        await IOUtils.makeDirectory(legacyDir, { ignoreExisting: true });
+        await IOUtils.writeJSON(foreign, { not: "a journal" });
+        await IOUtils.writeJSON(legacyForeign, { not: "a journal" });
+        const x = name("fx");
+        await makeItem([x]);
+        let result: Awaited<ReturnType<typeof rename>> | undefined;
+        try {
+          assert.notInclude(await listJournalIDs(), "notes");
+          // The legacy folder's other files are not moved.
+          assert.isTrue(await IOUtils.exists(legacyForeign));
+          result = await rename(x, name("fy"));
+          assert.match(result.journalId, /^\d{4}-\d{2}-\d{2}T/);
+          assert.equal((await listJournalIDs())[0], result.journalId);
+          assert.deepEqual((await findUndoable(libraryID)).unreadable, []);
+        } finally {
+          await IOUtils.remove(foreign, { ignoreAbsent: true });
+          await IOUtils.remove(legacyForeign, { ignoreAbsent: true });
+          try {
+            await IOUtils.remove(legacyDir); // only if now empty
+          } catch {
+            // leave a folder that holds other files
+          }
+        }
+      },
+    );
+
     itx("reports only the tags undo actually restored", async function () {
       const [a, b, gone] = [name("ra"), name("rb"), name("rg")];
       await makeItem([a]);
@@ -872,6 +963,32 @@ describe("engine (in Zotero)", function () {
         });
 
         assert.deepEqual(impact, { total: 2, outsideScope: 1 });
+      },
+    );
+
+    itx(
+      "counts child items of the collection's items as inside the scope",
+      async function () {
+        const col = await makeCollection();
+        const x = name("cn");
+        const parent = await makeItem([], col);
+        const note = new Zotero.Item("note");
+        note.libraryID = libraryID;
+        note.parentID = parent.id;
+        note.setNote(`${prefix}note`);
+        note.setTags([x]);
+        await note.saveTx();
+        itemsToErase.push(note);
+        const scope = { collectionID: col.id, includeSubcollections: true };
+
+        const listed = (await loadTags(libraryID, scope)).find(
+          (t) => t.name === x,
+        );
+        assert.equal(listed?.scopeCount, 1);
+        assert.deepEqual(await measureImpact(libraryID, [x], scope), {
+          total: 1,
+          outsideScope: 0,
+        });
       },
     );
   });

@@ -1,3 +1,5 @@
+import { lower } from "./caseStyles";
+
 export type DuplicateTier = "exact" | "case" | "normalized";
 
 const TIER_ORDER: DuplicateTier[] = ["exact", "case", "normalized"];
@@ -32,7 +34,7 @@ export function duplicateKey(name: string, tier: DuplicateTier): string {
   if (tier === "exact") return clean;
 
   const spaced = clean.replace(/\s+/gu, " ");
-  const lowered = spaced.toLowerCase();
+  const lowered = lower(spaced);
   if (tier === "case") return lowered;
 
   const folded = spaced

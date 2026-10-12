@@ -130,10 +130,20 @@ describe("dialog (in Zotero)", function () {
 
     assert.isTrue(close.defaultPrevented, "close must wait for the run");
     assert.isTrue(win.closed, "window closes once the run stopped");
-    const [id] = await newJournals(before);
-    const journal = await readJournal(id);
-    assert.oneOf(journal.status, ["cancelled", "done"]);
-    assert.exists(journal.after);
+    const ids = await newJournals(before);
+    let removed = 0;
+    for (const tag of tags) {
+      if (!(await typesOf(libraryID, tag)).length) removed++;
+    }
+    if (removed) {
+      assert.lengthOf(ids, 1, "a run that changed tags keeps its journal");
+      const journal = await readJournal(ids[0]);
+      assert.oneOf(journal.status, ["cancelled", "done"]);
+      assert.exists(journal.after);
+    } else {
+      // Stopped before the first change: nothing to undo, no journal.
+      assert.lengthOf(ids, 0);
+    }
   });
 
   it("closing the window when idle is not blocked", async function () {
@@ -219,7 +229,7 @@ describe("dialog (in Zotero)", function () {
       [...doc.querySelectorAll(".tw-table tbody .tw-tag-type")].map(
         (el) => el.textContent,
       ),
-      ["automatic", "both", "manual"],
+      ["auto", "both", "manual"],
     );
     header("name").click();
     assert.deepEqual(listed(), [c, b, a]);
@@ -306,6 +316,23 @@ describe("dialog (in Zotero)", function () {
     assert.include(count(), "1 not shown");
   });
 
+  it("Select All right after typing a filter selects the new matches", async function () {
+    const [match, other] = [name("fm"), name("fo")];
+    await makeItem([match, other]);
+    const { win, dialog } = await openDialog();
+    dialog.filter = prefix;
+    dialog.renderAll();
+    const doc = win.document;
+    const search = doc.querySelector<HTMLInputElement>('input[type="search"]')!;
+
+    // Within the filter's debounce: the list still shows both tags.
+    search.value = match;
+    search.dispatchEvent(new win.Event("input"));
+    doc.querySelector<HTMLButtonElement>(".tw-select-all")!.click();
+
+    assert.deepEqual([...dialog.selected], [match]);
+  });
+
   it("the Remove confirmation says it removes and names the tags", async function () {
     const tag = name("rc");
     await makeItem([tag]);
@@ -372,6 +399,37 @@ describe("dialog (in Zotero)", function () {
     }
   });
 
+  it("a reload still running when the scope changes does not win", async function () {
+    const [inside, outside] = [name("rin"), name("rout")];
+    const collection = new Zotero.Collection({
+      libraryID,
+      name: name("rcol"),
+    });
+    await collection.saveTx();
+    try {
+      const item = await makeItem([inside]);
+      item.setCollections([collection.id]);
+      await item.saveTx();
+      await makeItem([outside]);
+      const { dialog } = await openDialog();
+
+      // A library-wide reload (e.g. from the Notifier), then the switch.
+      const pending = dialog.reload();
+      await dialog.setScope({
+        libraryID,
+        collection: { id: collection.id, name: collection.name },
+      });
+      await pending;
+
+      const listed = dialog.rows
+        .map((r: { name: string }) => r.name)
+        .filter((n: string) => n.startsWith(prefix));
+      assert.deepEqual(listed, [inside]);
+    } finally {
+      await collection.eraseTx();
+    }
+  });
+
   it("reloads when tags change elsewhere in Zotero", async function () {
     const { dialog } = await openDialog();
     const tag = name("ext");
@@ -431,6 +489,27 @@ describe("dialog (in Zotero)", function () {
     assert.include(seen?.text ?? "", "Apply 1 change to 2 items");
     assert.isFalse(dialog.mainEl.hasAttribute("inert"));
     assert.isFalse(dialog.menuEl.hasAttribute("inert"));
+  });
+
+  it("counts only items that change when merging into a bigger tag", async function () {
+    const [small, big] = [name("sm"), name("bg")];
+    await makeItem([small]);
+    for (let i = 0; i < 3; i++) await makeItem([big]);
+    const { dialog } = await openDialog();
+    dialog.switchTab("unify");
+    dialog.selected = new Set([small]);
+    dialog.unifyTarget = big;
+    dialog.targetTouched = true;
+    dialog.refreshPlan();
+    let seen = "";
+    dialog.confirm = (_title: string, text: string) => {
+      seen = plain(text);
+      return false;
+    };
+
+    await dialog.apply();
+
+    assert.include(seen, "Apply 1 change to 1 item");
   });
 
   it("offers one survivor per name in a duplicate group", async function () {

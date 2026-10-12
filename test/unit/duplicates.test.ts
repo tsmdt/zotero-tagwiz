@@ -36,6 +36,13 @@ describe("duplicates", function () {
       );
     });
 
+    it("case tier lowercases İ to a plain i, as case conversion does", function () {
+      assert.equal(
+        duplicateKey("İstanbul", "case"),
+        duplicateKey("istanbul", "case"),
+      );
+    });
+
     it("normalized tier treats separators, camelCase and diacritics alike", function () {
       const k = duplicateKey("machine learning", "normalized");
       for (const n of [
@@ -191,6 +198,14 @@ describe("duplicates", function () {
       ]);
       assert.lengthOf(pairs, 1);
       assert.equal(pairs[0].reason, "plural");
+    });
+
+    it("lists a pair once when a name has case variants", function () {
+      const pairs = findFuzzyPairs([t("Neuron", 5), t("neuron"), t("neurons")]);
+      assert.deepEqual(
+        pairs.map((p) => [p.a.name, p.b.name].sort()),
+        [["Neuron", "neurons"]],
+      );
     });
 
     it("finds substitutions, insertions and deletions, not other first letters", function () {

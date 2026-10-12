@@ -27,10 +27,10 @@ In other words: its a plugin for cleaning up tags in bulk: change their case, re
 
 ## Usage
 
-Open TagWiz from the **Tools** menu, or right-click a collection and choose **TagWiz 🏷️**. The window lists the tags used in the selected collection, or all tags if a library is selected. Tick **Include subcollections** to count items in subcollections too.
+Open TagWiz from the **Tools** menu, or right-click a collection and choose **TagWiz 🏷️**. The window lists the tags used in the selected collection (including on its items' notes, attachments and annotations), or all tags if a library is selected. Tick **Include subcollections** to count items in subcollections too.
 
 > [!important]
-> **Every change applies to the whole library**, including items outside the currently selected collection (as well as items in the trash). The preview says how many items are affected and how many of them are outside the collection.
+> **Every change applies to the whole library**, including items outside the currently selected collection (as well as items in the trash). The preview says how many items are affected (items that only carry a merge target are not counted: they don't change) and how many of them are outside the collection.
 
 Pick a tab, select tags (the filter box helps with long lists), check the preview, untick anything you do not want, and press **Apply**.
 
@@ -41,7 +41,7 @@ Choose a style: lower case, UPPER CASE, Title Case, Sentence case, camelCase, Pa
 - **Keep ALL-CAPS and mixed-case words**: words like `NLP` or `iPhone` stay as they are in every style except UPPER CASE. `NLP methods` becomes `NLP Methods` in Title Case instead of `Nlp Methods`, `iPhone apps` becomes `iPhone Apps` instead of `Iphone Apps`, and `LLM Framework Studies` becomes `LLMframeworkStudies` in camelCase.
 - **Keep prefix**: type a prefix such as `TECH: `, `00_` or `Aa-`. In tags that start with exactly this text (case-sensitive, spaces count), the prefix stays as typed and only the rest changes: `TECH: 2026 deep learning` becomes `TECH: 2026DeepLearning` in camelCase. Leave it empty to convert whole tags.
 
-snake_case, kebab-case, camelCase and PascalCase split words at spaces, "-" and "\_" only, so other characters are kept: `C++ programming` becomes `c++_programming`, not `c_programming`.
+snake_case, kebab-case, camelCase and PascalCase split words at spaces, "-" and "\_" only, so other characters are kept: `C++ programming` becomes `c++_programming`, not `c_programming`. A leading or trailing "-" or "\_" stays too, so workflow tags keep sorting first: `_to read` becomes `_to_read` in snake_case and `_toRead` in camelCase.
 
 If two tags end up with the same name, the preview marks them as a merge.
 
@@ -91,7 +91,6 @@ npm start              # build, start Zotero with the plugin, reload on changes
 | `npm run test:unit`  | Unit tests of the pure logic in plain Node                      |
 | `npm test`           | All tests inside Zotero                                         |
 | `npm run lint:check` | Prettier and ESLint                                             |
-| `npm run release`    | Bump the version, tag and push; the workflow publishes          |
 
 **Never use your live Zotero profile or data directory for development.**
 
@@ -100,3 +99,7 @@ Built on the [Zotero Plugin Template](https://github.com/windingwind/zotero-plug
 ## License
 
 [AGPL-3.0-or-later](LICENSE). No warranties are provided.
+
+## Acknowledgment
+
+Claude Sonnet 5.5 and Opus 5.5 where used creating this extension.
