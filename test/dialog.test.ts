@@ -219,7 +219,7 @@ describe("dialog (in Zotero)", function () {
       [...doc.querySelectorAll(".tw-table tbody .tw-tag-type")].map(
         (el) => el.textContent,
       ),
-      ["automatic", "both", "manual"],
+      ["auto", "both", "manual"],
     );
     header("name").click();
     assert.deepEqual(listed(), [c, b, a]);
