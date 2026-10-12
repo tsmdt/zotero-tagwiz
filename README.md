@@ -67,7 +67,7 @@ Each group suggests a spelling to keep (the most used one); pick another one wit
 
 Before the first change of every run, TagWiz saves a snapshot of the affected tags in a `tagwiz` folder inside your Zotero data directory. **Undo Latest Edit** restores the tags from the most recent run, including which items carry them, their manual or automatic type and their colors.
 
-Keep in mind that **only the latest run can be undone**, and each run only once. If the tags were changed again afterwards (for example by a sync), TagWiz lists them and asks before overwriting; restoring anyway cannot itself be undone. TagWiz keeps the snapshots of the last 10 runs of each library. A run that changed nothing (for example, cancelled before its first change) keeps no snapshot, so the run before it can still be undone.
+Keep in mind that **only the latest run can be undone**, and each run only once. If the tags were changed again afterwards (for example by a sync), TagWiz lists them and asks before overwriting; restoring anyway cannot itself be undone. TagWiz keeps the snapshots of the last 10 runs of each library.
 
 Manual and automatic tags keep their type, and tag colors move with the tag. Changes sync like any other edit, so wait for a running sync to finish before editing tags, and keep a backup of your Zotero data before the first big run.
 
@@ -91,7 +91,6 @@ npm start              # build, start Zotero with the plugin, reload on changes
 | `npm run test:unit`  | Unit tests of the pure logic in plain Node                      |
 | `npm test`           | All tests inside Zotero                                         |
 | `npm run lint:check` | Prettier and ESLint                                             |
-| `npm run release`    | Bump the version, tag and push; the workflow publishes          |
 
 **Never use your live Zotero profile or data directory for development.**
 
@@ -100,3 +99,7 @@ Built on the [Zotero Plugin Template](https://github.com/windingwind/zotero-plug
 ## License
 
 [AGPL-3.0-or-later](LICENSE). No warranties are provided.
+
+## Acknowledgment
+
+Claude Sonnet 5.5 and Opus 5.5 where used creating this extension.
