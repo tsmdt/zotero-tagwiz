@@ -190,6 +190,8 @@ export class TagWizDialog {
   private allTags: TagRef[] = [];
   private rows: NameRow[] = [];
   private selected = new Set<string>();
+  /** The tag clicked last: where a Shift + Click range starts. */
+  private rangeAnchor?: string;
   /** Names currently rendered in the tag list (filter and MAX_ROWS applied). */
   private shownNames = new Set<string>();
   private excluded = new Set<string>();
@@ -1013,19 +1015,46 @@ export class TagWizDialog {
         ),
       );
     }
-    for (const row of rows) {
+    const boxes: HTMLInputElement[] = [];
+    const trs: HTMLElement[] = [];
+    const set = (index: number, on: boolean) => {
+      if (on) this.selected.add(rows[index].name);
+      else this.selected.delete(rows[index].name);
+      boxes[index].checked = on;
+      trs[index].classList.toggle("tw-row-selected", on);
+    };
+    // Shift + Click: every row from the one clicked last to this one gets
+    // this row's new state, like in a file manager. Without a shown anchor
+    // (e.g. hidden by the filter since), only this row toggles.
+    const selectRange = (index: number) => {
+      const on = !this.selected.has(rows[index].name);
+      let anchor = rows.findIndex((r) => r.name === this.rangeAnchor);
+      if (anchor < 0) anchor = index;
+      const [from, to] = anchor < index ? [anchor, index] : [index, anchor];
+      for (let i = from; i <= to; i++) set(i, on);
+      this.rangeAnchor = rows[index].name;
+      updateCount();
+      this.selectionChanged();
+    };
+    for (const [index, row] of rows.entries()) {
       const box = h(doc, "input", {
         type: "checkbox",
         checked: this.selected.has(row.name),
         "aria-label": row.name,
+        onclick: (e: MouseEvent) => {
+          // The box has already toggled; the change event that follows
+          // finds the selection up to date and does nothing.
+          if (e.shiftKey) selectRange(index);
+        },
         onchange: () => {
-          if (box.checked) this.selected.add(row.name);
-          else this.selected.delete(row.name);
-          tr.classList.toggle("tw-row-selected", box.checked);
+          if (this.selected.has(row.name) === box.checked) return;
+          set(index, box.checked);
+          this.rangeAnchor = row.name;
           updateCount();
           this.selectionChanged();
         },
       });
+      boxes.push(box);
       const name = h(
         doc,
         "td",
@@ -1036,7 +1065,13 @@ export class TagWizDialog {
       const tr = h(
         doc,
         "tr",
-        { class: this.selected.has(row.name) ? "tw-row-selected" : "" },
+        {
+          class: this.selected.has(row.name) ? "tw-row-selected" : "",
+          // Shift would otherwise extend the text selection.
+          onmousedown: (e: MouseEvent) => {
+            if (e.shiftKey) e.preventDefault();
+          },
+        },
         h(doc, "td", { class: "tw-checkbox" }, box),
         name,
         h(
@@ -1050,7 +1085,8 @@ export class TagWizDialog {
           : null,
         h(doc, "td", { class: "tw-count" }, row.items),
       );
-      clickInputOnRowClick(tr, box);
+      trs.push(tr);
+      clickInputOnRowClick(tr, box, () => selectRange(index));
       tbody.appendChild(tr);
     }
     updateCount();
@@ -2069,12 +2105,23 @@ function swatch(doc: Document, color: string): HTMLElement {
   return el;
 }
 
-/** A click anywhere in the row clicks its checkbox or radio button. */
-function clickInputOnRowClick(row: HTMLElement, input: HTMLInputElement) {
+/**
+ * A click anywhere in the row clicks its checkbox or radio button, or calls
+ * `onShiftClick` (if given) when Shift is held.
+ */
+function clickInputOnRowClick(
+  row: HTMLElement,
+  input: HTMLInputElement,
+  onShiftClick?: () => void,
+) {
   // A disabled input (e.g. an interrupted run) ignores the click anyway.
   if (!input.disabled) row.classList.add("tw-clickable-row");
   row.addEventListener("click", (e) => {
     if (e.target === input) return; // the input handles its own click
+    if ((e as MouseEvent).shiftKey && onShiftClick && !input.disabled) {
+      onShiftClick();
+      return;
+    }
     // Dragging to select text (e.g. a tag name) is not a click on the row.
     if (row.ownerDocument?.defaultView?.getSelection()?.toString()) return;
     input.click();

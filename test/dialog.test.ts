@@ -344,6 +344,46 @@ describe("dialog (in Zotero)", function () {
     assert.isTrue(dialog.selected.has(tag));
   });
 
+  it("Shift + Click ticks or unticks every row from the last clicked one", async function () {
+    const tags = [name("shr"), name("shr"), name("shr"), name("shr")];
+    await makeItem(tags);
+    const { win, dialog } = await openDialog();
+    dialog.filter = `${prefix}shr`;
+    dialog.renderAll();
+    const rows = () =>
+      [...dialog.leftEl.querySelectorAll("tbody tr")] as HTMLElement[];
+    const click = (
+      index: number,
+      shiftKey = false,
+      target = ".tw-tag-name",
+    ) => {
+      const el = rows()[index].querySelector(target)!;
+      const init = { bubbles: true, cancelable: true, shiftKey };
+      el.dispatchEvent(new win.MouseEvent("click", init));
+    };
+    const ticked = () =>
+      rows().map((r) => (r.querySelector("input") as HTMLInputElement).checked);
+    const shown = () =>
+      rows().map((r) => r.querySelector(".tw-tag-name")!.textContent);
+    assert.lengthOf(rows(), 4);
+
+    click(0);
+    click(2, true);
+    assert.deepEqual(ticked(), [true, true, true, false]);
+    assert.sameMembers([...dialog.selected], shown().slice(0, 3));
+    assert.isTrue(rows()[1].classList.contains("tw-row-selected"));
+
+    // From the row clicked last; on the checkbox itself too.
+    click(3, true, "input");
+    assert.deepEqual(ticked(), [true, true, true, true]);
+
+    // A ticked row unticks the range.
+    click(1, true);
+    assert.deepEqual(ticked(), [true, false, false, false]);
+    assert.sameMembers([...dialog.selected], shown().slice(0, 1));
+    assert.isFalse(rows()[2].classList.contains("tw-row-selected"));
+  });
+
   it("counts selected tags the filter hides", async function () {
     const [a, b] = [name("ha"), name("hb")];
     await makeItem([a, b]);
