@@ -17,6 +17,7 @@ tab-duplicates = Clean Duplicates
 tab-history = History
 
 filter-placeholder = Filter tags…
+clear-input = Clear
 select-shown = Select All
 select-none = Deselect
 selected-count = { $count } selected
@@ -79,6 +80,14 @@ note-too-long = the new name is too long
 note-target-changed = the target is also changed here
 impact = Affects { $total } items in the library, { $outside } of them outside this collection (or in the trash).
 impact-library = Affects { $total } items in the library.
+tag-total-library = { $count ->
+        [one] 1 unique tag in this library
+       *[other] { $count } unique tags in this library
+    }
+tag-total-collection = { $count ->
+        [one] 1 unique tag in this collection
+       *[other] { $count } unique tags in this collection
+    }
 
 apply = Apply
 cancel = Cancel

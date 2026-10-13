@@ -15,7 +15,7 @@
  *   │          │  groups, or the     │ │  edits Undo/Redo do) │ │
  *   │          │  History list)      │ │                      │ │
  *   │          └─────────────────────┘ └──────────────────────┘ │
- *   │ .tw-footer   status | Close | Apply (History: undo, redo) │
+ *   │ .tw-footer   tag count | latest message     Close  Apply  │
  *   └───────────────────────────────────────────────────────────┘
  *
  * Colors are system colors, so the dialog follows light and dark mode.
@@ -233,9 +233,13 @@ body {
   min-height: var(--tw-row);
 }
 
-.tw-pane-header input[type="search"] {
+.tw-pane-header .tw-clearable {
   flex: 1;
   min-width: 120px;
+}
+
+.tw-pane-header .tw-clearable > input[type="search"] {
+  width: 100%;
 }
 
 .tw-pane-title {
@@ -265,7 +269,7 @@ body {
 
 input[type="search"],
 input[type="text"],
-button:not(.tw-tab, .tw-sort-button) {
+button:not(.tw-tab, .tw-sort-button, .tw-clear) {
   appearance: none;
   box-sizing: border-box;
   height: var(--tw-row);
@@ -293,7 +297,7 @@ input[type="text"]:focus {
   outline: 1px solid var(--tw-accent);
 }
 
-button:not(.tw-tab, .tw-sort-button) {
+button:not(.tw-tab, .tw-sort-button, .tw-clear) {
   padding: 0 12px;
   background: var(--tw-band);
   cursor: pointer;
@@ -311,6 +315,53 @@ button:not(.tw-tab, .tw-sort-button):focus-visible {
 button:not(.tw-tab, .tw-sort-button):disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* A text field with a "×" at its right edge that empties it (see clearable
+ * in src/ui/dom.ts). The "×" shows only while the field has text. */
+.tw-clearable {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.tw-clearable > input {
+  padding-inline-end: 24px;
+}
+
+button.tw-clear {
+  appearance: none;
+  position: absolute;
+  inset-inline-end: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--tw-muted);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+button.tw-clear:hover {
+  color: inherit;
+}
+
+.tw-clearable > input:placeholder-shown + .tw-clear {
+  display: none;
+}
+
+/* Newer Firefox draws its own clear button in search fields. A rule of its
+ * own: older versions drop any rule with this unknown pseudo-element. */
+input[type="search"]::-moz-search-clear-button {
+  display: none;
 }
 
 /* Parts locked during a run (see TagWizDialog.setBusy). */
@@ -650,7 +701,8 @@ tr.tw-history-undone {
 }
 
 /* ---------------------------------------------------------------------------
- * Footer: impact and status text on the left, then Undo, Close and Apply
+ * Footer: the tag count and the latest message (impact or status) side by
+ * side on the left, then Close and Apply
  * ------------------------------------------------------------------------- */
 
 .tw-footer {
@@ -660,10 +712,29 @@ tr.tw-history-undone {
   gap: 8px 12px;
 }
 
-/* Takes the free space, pushing the buttons to the right. */
+/* Takes the free space, pushing the buttons to the right. The two messages
+ * share one row, divided by a .tw-separator line; a long message wraps within
+ * its own column instead of moving below the count. */
 .tw-footer .tw-footer-info {
   flex: 1;
   min-width: 200px;
+  /* As high as the buttons, so the lines are as long as the menus' ones. */
+  min-height: var(--tw-row);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tw-footer-info > :not(.tw-separator) {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* Short: never wrapped or squeezed. */
+.tw-footer-info > .tw-tag-total {
+  flex: none;
+  white-space: nowrap;
+  color: var(--tw-muted);
 }
 
 .tw-status[data-kind="error"] {

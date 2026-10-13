@@ -54,6 +54,40 @@ export function append(parent: Node, children: readonly Child[]) {
   }
 }
 
+/**
+ * Wrap a text input with a small "×" button at its right edge that empties
+ * it. Clearing fires the input's own `input` event, so its handler reacts as
+ * if the user had deleted the text. CSS hides the button while the
+ * placeholder shows, so the input needs a placeholder.
+ */
+export function clearable(
+  doc: Document,
+  input: HTMLInputElement,
+  label: string,
+): HTMLElement {
+  const button = h(
+    doc,
+    "button",
+    {
+      type: "button",
+      class: "tw-clear",
+      // Not a tab stop of its own: the keyboard can select and delete.
+      tabIndex: -1,
+      title: label,
+      "aria-label": label,
+      onclick: () => {
+        input.value = "";
+        // The dialog window's Event: the plugin's scope may lack one.
+        const { Event } = doc.defaultView!;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.focus();
+      },
+    },
+    "×",
+  );
+  return h(doc, "span", { class: "tw-clearable" }, input, button);
+}
+
 export function clear(el: Element) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }

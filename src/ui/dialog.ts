@@ -37,7 +37,7 @@ import { loadTags, measureImpact, type Scope } from "../zotero/tagStore";
 import { FluentMessageId } from "../../typings/i10n";
 import { getString } from "../utils/locale";
 import { isWindowAlive } from "../utils/window";
-import { append, clear, h } from "./dom";
+import { append, clear, clearable, h } from "./dom";
 
 export interface DialogParams {
   libraryID: number;
@@ -189,6 +189,8 @@ export class TagWizDialog {
   private columnWidths: Partial<Record<ResizableTable, number[]>> = {};
   private allTags: TagRef[] = [];
   private rows: NameRow[] = [];
+  /** Tags were read at least once; until then there is nothing to count. */
+  private loaded = false;
   private selected = new Set<string>();
   /** Names currently rendered in the tag list (filter and MAX_ROWS applied). */
   private shownNames = new Set<string>();
@@ -222,6 +224,11 @@ export class TagWizDialog {
     kind: "info",
   };
   private impactText = "";
+  /**
+   * Which message the footer shows next to the tag count: the one set last.
+   * Without an impact (nothing to apply) it shows the status.
+   */
+  private latest: "status" | "impact" = "status";
   private impactSeq = 0;
   private impactTimer?: number;
   private filterTimer?: number;
@@ -324,6 +331,8 @@ export class TagWizDialog {
     this.filter = "";
     // The collection column comes and goes.
     this.columnWidths = {};
+    // The rows are the old scope's until the reload below.
+    this.loaded = false;
     this.status = { text: "", kind: "info" };
     this.checkLibrary();
     this.buildSkeleton();
@@ -473,6 +482,7 @@ export class TagWizDialog {
     }
     this.fuzzy = undefined;
     this.recomputeGroups();
+    this.loaded = true;
     return true;
   }
 
@@ -598,11 +608,15 @@ export class TagWizDialog {
         return;
       }
       if (seq !== this.impactSeq) return; // a newer plan superseded this one
-      this.impactText = this.scope
+      const text = this.scope
         ? getString("impact", {
             args: { total: impact.total, outside: impact.outsideScope },
           })
         : getString("impact-library", { args: { total: impact.total } });
+      // Only a new impact replaces the status: not the same one again, as
+      // after a reload that left the plan as it was.
+      if (text !== this.impactText) this.latest = "impact";
+      this.impactText = text;
     }
     if (seq === this.impactSeq && this.alive) this.renderFooter();
   }
@@ -812,19 +826,23 @@ export class TagWizDialog {
       doc,
       "div",
       { class: "tw-pane-header" },
-      h(doc, "input", {
-        type: "search",
-        placeholder: getString("filter-placeholder"),
-        value: this.filter,
-        oninput: (e: Event) => {
-          this.filter = (e.target as HTMLInputElement).value;
-          this.win.clearTimeout(this.filterTimer);
-          this.filterTimer = this.win.setTimeout(
-            () => this.fillRows(tbody, updateCount, more),
-            FILTER_DELAY,
-          );
-        },
-      }),
+      clearable(
+        doc,
+        h(doc, "input", {
+          type: "search",
+          placeholder: getString("filter-placeholder"),
+          value: this.filter,
+          oninput: (e: Event) => {
+            this.filter = (e.target as HTMLInputElement).value;
+            this.win.clearTimeout(this.filterTimer);
+            this.filterTimer = this.win.setTimeout(
+              () => this.fillRows(tbody, updateCount, more),
+              FILTER_DELAY,
+            );
+          },
+        }),
+        getString("clear-input"),
+      ),
       selectAll,
       selectNone,
       countEl,
@@ -1133,19 +1151,23 @@ export class TagWizDialog {
           "div",
           { class: "tw-field", title: getString("case-prefix-hint") },
           h(doc, "label", { for: "tw-prefix" }, getString("case-prefix")),
-          h(doc, "input", {
-            type: "text",
-            id: "tw-prefix",
-            placeholder: getString("case-prefix-placeholder"),
-            value: this.caseOpts.prefix ?? "",
-            oninput: (e: Event) => {
-              this.caseOpts = {
-                ...this.caseOpts,
-                prefix: (e.target as HTMLInputElement).value,
-              };
-              this.refreshPlan();
-            },
-          }),
+          clearable(
+            doc,
+            h(doc, "input", {
+              type: "text",
+              id: "tw-prefix",
+              placeholder: getString("case-prefix-placeholder"),
+              value: this.caseOpts.prefix ?? "",
+              oninput: (e: Event) => {
+                this.caseOpts = {
+                  ...this.caseOpts,
+                  prefix: (e.target as HTMLInputElement).value,
+                };
+                this.refreshPlan();
+              },
+            }),
+            getString("clear-input"),
+          ),
         ),
       ]);
     } else if (this.tab === "unify") {
@@ -1159,18 +1181,22 @@ export class TagWizDialog {
           "div",
           { class: "tw-field" },
           h(doc, "label", { for: "tw-target" }, getString("unify-target")),
-          h(doc, "input", {
-            type: "text",
-            id: "tw-target",
-            placeholder: getString("unify-target-placeholder"),
-            list: "tw-targets",
-            value: this.unifyTarget,
-            oninput: (e: Event) => {
-              this.unifyTarget = (e.target as HTMLInputElement).value;
-              this.targetTouched = true;
-              this.refreshPlan();
-            },
-          }),
+          clearable(
+            doc,
+            h(doc, "input", {
+              type: "text",
+              id: "tw-target",
+              placeholder: getString("unify-target-placeholder"),
+              list: "tw-targets",
+              value: this.unifyTarget,
+              oninput: (e: Event) => {
+                this.unifyTarget = (e.target as HTMLInputElement).value;
+                this.targetTouched = true;
+                this.refreshPlan();
+              },
+            }),
+            getString("clear-input"),
+          ),
           list,
         ),
         h(
@@ -1717,11 +1743,30 @@ export class TagWizDialog {
     const { doc } = this;
     clear(this.footerEl);
     const ops = includedOps(this.plan);
+    // Two messages side by side: the tag count, then the latest message.
+    const message =
+      this.latest === "impact" && this.impactText
+        ? { text: this.impactText, kind: "info" }
+        : this.status;
+    // Unique names in the scope, as listed on the left before filtering.
+    const total = this.loaded
+      ? h(
+          doc,
+          "div",
+          { class: "tw-tag-total" },
+          getString(
+            this.collection ? "tag-total-collection" : "tag-total-library",
+            { args: { count: this.rows.length } },
+          ),
+        )
+      : null;
     const info = h(
       doc,
       "div",
       { class: "tw-footer-info" },
-      this.impactText ? h(doc, "div", {}, this.impactText) : null,
+      total,
+      total && message.text ? h(doc, "div", { class: "tw-separator" }) : null,
+      // Always there, empty or not: it is the live region.
       h(
         doc,
         "div",
@@ -1729,9 +1774,9 @@ export class TagWizDialog {
           class: "tw-status",
           role: "status",
           "aria-live": "polite",
-          "data-kind": this.status.kind,
+          "data-kind": message.kind,
         },
-        this.status.text,
+        message.text,
       ),
     );
     // On History, Apply undoes or redoes, whichever the selected run allows.
@@ -1775,6 +1820,7 @@ export class TagWizDialog {
 
   private setStatus(text: string, kind: "info" | "error" = "info") {
     this.status = { text, kind };
+    this.latest = "status";
     if (this.footerEl && this.alive) this.renderFooter();
   }
 
