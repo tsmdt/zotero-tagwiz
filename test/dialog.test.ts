@@ -323,6 +323,67 @@ describe("dialog (in Zotero)", function () {
     assert.isTrue(highlighted());
   });
 
+  it("a click anywhere in a tag's row toggles it", async function () {
+    const tag = name("rc");
+    await makeItem([tag]);
+    const { dialog } = await openDialog();
+    dialog.filter = tag;
+    dialog.renderAll();
+    const row = () => dialog.leftEl.querySelector("tbody tr") as HTMLElement;
+    const box = () => row().querySelector("input") as HTMLInputElement;
+
+    (row().querySelector(".tw-tag-name") as HTMLElement).click();
+    assert.isTrue(dialog.selected.has(tag));
+    assert.isTrue(box().checked);
+    assert.isTrue(row().classList.contains("tw-row-selected"));
+    (row().querySelector(".tw-count") as HTMLElement).click();
+    assert.isFalse(dialog.selected.has(tag));
+
+    // The checkbox itself still toggles once, not twice.
+    box().click();
+    assert.isTrue(dialog.selected.has(tag));
+  });
+
+  it("Shift + Click ticks or unticks every row from the last clicked one", async function () {
+    const tags = [name("shr"), name("shr"), name("shr"), name("shr")];
+    await makeItem(tags);
+    const { win, dialog } = await openDialog();
+    dialog.filter = `${prefix}shr`;
+    dialog.renderAll();
+    const rows = () =>
+      [...dialog.leftEl.querySelectorAll("tbody tr")] as HTMLElement[];
+    const click = (
+      index: number,
+      shiftKey = false,
+      target = ".tw-tag-name",
+    ) => {
+      const el = rows()[index].querySelector(target)!;
+      const init = { bubbles: true, cancelable: true, shiftKey };
+      el.dispatchEvent(new win.MouseEvent("click", init));
+    };
+    const ticked = () =>
+      rows().map((r) => (r.querySelector("input") as HTMLInputElement).checked);
+    const shown = () =>
+      rows().map((r) => r.querySelector(".tw-tag-name")!.textContent);
+    assert.lengthOf(rows(), 4);
+
+    click(0);
+    click(2, true);
+    assert.deepEqual(ticked(), [true, true, true, false]);
+    assert.sameMembers([...dialog.selected], shown().slice(0, 3));
+    assert.isTrue(rows()[1].classList.contains("tw-row-selected"));
+
+    // From the row clicked last; on the checkbox itself too.
+    click(3, true, "input");
+    assert.deepEqual(ticked(), [true, true, true, true]);
+
+    // A ticked row unticks the range.
+    click(1, true);
+    assert.deepEqual(ticked(), [true, false, false, false]);
+    assert.sameMembers([...dialog.selected], shown().slice(0, 1));
+    assert.isFalse(rows()[2].classList.contains("tw-row-selected"));
+  });
+
   it("counts selected tags the filter hides", async function () {
     const [a, b] = [name("ha"), name("hb")];
     await makeItem([a, b]);
@@ -858,6 +919,35 @@ describe("dialog (in Zotero)", function () {
       const radio = rows()[0].querySelector("input") as HTMLInputElement;
       assert.isTrue(radio.disabled, "an interrupted run cannot be redone");
       assert.equal(rows()[0].querySelectorAll("td")[5].textContent, "undone");
+
+      // Nor selected by clicking its row.
+      dialog.historySelected = undefined;
+      rows()[0].querySelectorAll("td")[1].click();
+      assert.isUndefined(dialog.historySelected);
+    });
+
+    it("selects a run by clicking anywhere in its row", async function () {
+      const [x, y, z] = [name("rx"), name("ry"), name("rz")];
+      await makeItem([x]);
+      const first = await renameRun(x, y);
+      const second = await renameRun(y, z);
+      const { dialog, rows } = await openHistory();
+      const index = (id: string) =>
+        dialog.history.findIndex((e: { id: string }) => e.id === id);
+
+      rows()[index(first)].querySelectorAll("td")[3].click();
+      assert.equal(dialog.historySelected, first);
+      assert.isTrue(rows()[index(first)].classList.contains("tw-row-selected"));
+
+      rows()[index(second)].querySelectorAll("td")[1].click();
+      assert.equal(dialog.historySelected, second);
+      assert.isFalse(
+        rows()[index(first)].classList.contains("tw-row-selected"),
+      );
+      const radio = rows()[index(second)].querySelector(
+        "input",
+      ) as HTMLInputElement;
+      assert.isTrue(radio.checked);
     });
 
     it("warns about an unreadable snapshot the undo or redo would skip", async function () {
