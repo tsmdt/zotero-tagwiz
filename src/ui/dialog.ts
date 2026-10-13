@@ -1050,6 +1050,7 @@ export class TagWizDialog {
           : null,
         h(doc, "td", { class: "tw-count" }, row.items),
       );
+      clickInputOnRowClick(tr, box);
       tbody.appendChild(tr);
     }
     updateCount();
@@ -1425,31 +1426,27 @@ export class TagWizDialog {
           undone ? "tw-history-undone" : "",
           entry.id === this.historySelected ? "tw-row-selected" : "",
         ];
+        const radio = h(doc, "input", {
+          type: "radio",
+          name: "tw-history",
+          checked: entry.id === this.historySelected,
+          // e.g. an interrupted run, which cannot be redone.
+          disabled: !historyAction(this.history, entry.id),
+          "aria-label": `${formatDate(entry.createdAt)} ${formatTime(entry.createdAt)}`,
+          onchange: () => {
+            this.historySelected = entry.id;
+            // Mark the row without redrawing the list (and its scroll).
+            for (const tr of tbody.children) {
+              tr.classList.toggle("tw-row-selected", tr === row);
+            }
+            this.refreshPlan();
+          },
+        });
         const row = h(
           doc,
           "tr",
           { class: classes.filter(Boolean).join(" ") },
-          h(
-            doc,
-            "td",
-            { class: "tw-checkbox" },
-            h(doc, "input", {
-              type: "radio",
-              name: "tw-history",
-              checked: entry.id === this.historySelected,
-              // e.g. an interrupted run, which cannot be redone.
-              disabled: !historyAction(this.history, entry.id),
-              "aria-label": `${formatDate(entry.createdAt)} ${formatTime(entry.createdAt)}`,
-              onchange: () => {
-                this.historySelected = entry.id;
-                // Mark the row without redrawing the list (and its scroll).
-                for (const tr of tbody.children) {
-                  tr.classList.toggle("tw-row-selected", tr === row);
-                }
-                this.refreshPlan();
-              },
-            }),
-          ),
+          h(doc, "td", { class: "tw-checkbox" }, radio),
           h(doc, "td", { class: "tw-nowrap" }, formatDate(entry.createdAt)),
           h(doc, "td", { class: "tw-nowrap" }, formatTime(entry.createdAt)),
           h(
@@ -1461,6 +1458,7 @@ export class TagWizDialog {
           h(doc, "td", { class: "tw-count" }, entry.items),
           h(doc, "td", { class: "tw-tag-type" }, status),
         );
+        clickInputOnRowClick(row, radio);
         tbody.appendChild(row);
       }
       const table = h(
@@ -2069,6 +2067,18 @@ function swatch(doc: Document, color: string): HTMLElement {
   });
   el.style.backgroundColor = color;
   return el;
+}
+
+/** A click anywhere in the row clicks its checkbox or radio button. */
+function clickInputOnRowClick(row: HTMLElement, input: HTMLInputElement) {
+  // A disabled input (e.g. an interrupted run) ignores the click anyway.
+  if (!input.disabled) row.classList.add("tw-clickable-row");
+  row.addEventListener("click", (e) => {
+    if (e.target === input) return; // the input handles its own click
+    // Dragging to select text (e.g. a tag name) is not a click on the row.
+    if (row.ownerDocument?.defaultView?.getSelection()?.toString()) return;
+    input.click();
+  });
 }
 
 function errorText(e: unknown): string {
