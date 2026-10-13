@@ -1,11 +1,17 @@
 /* eslint-disable mocha/no-setup-in-describe, mocha/consistent-spacing-between-blocks -- itx() is a thin wrapper around it() that makes errors readable */
 import { assert } from "chai";
 import type { Op, TagRef, TagType } from "../src/core/types";
-import { applyOps, undoJournal } from "../src/zotero/engine";
+import {
+  applyOps,
+  redoJournal,
+  redoTo,
+  undoJournal,
+  undoTo,
+} from "../src/zotero/engine";
 import { preflight } from "../src/zotero/guard";
 import {
-  findUndoable,
-  latestUndoable,
+  deleteJournal,
+  listHistory,
   listJournalIDs,
   newJournalID,
   pruneJournals,
@@ -190,7 +196,7 @@ describe("engine (in Zotero)", function () {
       await writeJournal({
         version: 1,
         id,
-        createdAt: "",
+        createdAt: new Date().toISOString(),
         libraryID,
         status: "done",
         tasks: [],
@@ -199,6 +205,8 @@ describe("engine (in Zotero)", function () {
       });
       assert.equal((await readJournal(id)).id, id);
       assert.include(await listJournalIDs(), id);
+      // Not left in the History of the test profile's library.
+      await deleteJournal(id);
     });
 
     itx(
@@ -656,8 +664,9 @@ describe("engine (in Zotero)", function () {
         delete journal.after;
         await writeJournal(journal);
 
-        const latest = await latestUndoable(libraryID);
+        const [latest] = (await listHistory(libraryID)).entries;
         assert.equal(latest?.id, result.journalId);
+        assert.isTrue(latest?.interrupted);
         const refused = await undoJournal(result.journalId);
         assert.deepEqual(refused, { ok: false, reason: "interrupted" });
         assert.isTrue(item.hasTag(y));
@@ -670,7 +679,7 @@ describe("engine (in Zotero)", function () {
     );
 
     itx(
-      "reports unreadable journals newer than the undoable one",
+      "lists unreadable journals apart from the library's runs",
       async function () {
         const [x, y] = [name("jx"), name("jy")];
         await makeItem([x]);
@@ -683,12 +692,9 @@ describe("engine (in Zotero)", function () {
         );
         await IOUtils.writeUTF8(broken, '{"version": 1, "id": "trunc');
         try {
-          const found = await findUndoable(libraryID);
-          assert.equal(found.journal?.id, result.journalId);
+          const found = await listHistory(libraryID);
+          assert.equal(found.entries[0]?.id, result.journalId);
           assert.deepEqual(found.unreadable, [brokenID]);
-          // Older unreadable files do not matter: the newest journal wins.
-          const latest = await latestUndoable(libraryID);
-          assert.equal(latest?.id, result.journalId);
         } finally {
           await IOUtils.remove(broken, { ignoreAbsent: true });
         }
@@ -747,7 +753,7 @@ describe("engine (in Zotero)", function () {
             error = e;
           }
           assert.exists(error);
-          assert.include((await findUndoable(libraryID)).unreadable, id);
+          assert.include((await listHistory(libraryID)).unreadable, id);
         } finally {
           await IOUtils.remove(journalPath(id), { ignoreAbsent: true });
         }
@@ -854,7 +860,8 @@ describe("engine (in Zotero)", function () {
 
         assert.equal(second.skippedTasks, 1);
         assert.equal(second.journalId, "");
-        assert.equal((await latestUndoable(libraryID))?.id, first.journalId);
+        const [latest] = (await listHistory(libraryID)).entries;
+        assert.equal(latest?.id, first.journalId);
       },
     );
 
@@ -882,7 +889,7 @@ describe("engine (in Zotero)", function () {
           result = await rename(x, name("fy"));
           assert.match(result.journalId, /^\d{4}-\d{2}-\d{2}T/);
           assert.equal((await listJournalIDs())[0], result.journalId);
-          assert.deepEqual((await findUndoable(libraryID)).unreadable, []);
+          assert.deepEqual((await listHistory(libraryID)).unreadable, []);
         } finally {
           await IOUtils.remove(foreign, { ignoreAbsent: true });
           await IOUtils.remove(legacyForeign, { ignoreAbsent: true });
@@ -894,26 +901,467 @@ describe("engine (in Zotero)", function () {
         }
       },
     );
+  });
 
-    itx("reports only the tags undo actually restored", async function () {
-      const [a, b, gone] = [name("ra"), name("rb"), name("rg")];
+  describe("history", function () {
+    const snapshot = async (tags: string[]) =>
+      (await captureStates(libraryID, tags)).map((t) => ({
+        name: t.name,
+        items: t.items.map((i) => `${i.id}:${i.type}`).sort(),
+      }));
+
+    itx(
+      "lists this library's runs newest first, with kind and changed items",
+      async function () {
+        const [a, b, c] = [name("ha"), name("hb"), name("hc")];
+        await makeItem([a]);
+        await makeItem([a, b]);
+        await makeItem([b]);
+        const first = await applyOps({
+          libraryID,
+          ops: [{ kind: "rename", from: await ref(a), to: b }],
+          allTags: await loadTags(libraryID),
+          kind: "merge",
+        });
+        const second = await applyOps({
+          libraryID,
+          ops: [{ kind: "remove", tag: await ref(b) }],
+          allTags: await loadTags(libraryID),
+          kind: "remove",
+        });
+        await makeItem([c]);
+        const legacy = await rename(c, name("hd")); // no kind recorded
+
+        const { entries } = await listHistory(libraryID);
+        const ids = entries.map((e) => e.id);
+        assert.deepEqual(ids.slice(0, 3), [
+          legacy.journalId,
+          second.journalId,
+          first.journalId,
+        ]);
+        const [l, r, m] = entries;
+        // The item that carried only b keeps it: 2 of 3 items change.
+        assert.include(m, { kind: "merge", items: 2, status: "done" });
+        assert.include(r, { kind: "remove", items: 3 });
+        assert.include(l, { kind: "rename", items: 1, interrupted: false });
+        assert.equal((await readJournal(first.journalId)).kind, "merge");
+      },
+    );
+
+    itx(
+      "restores the state before an older run, undoing the newer ones",
+      async function () {
+        const [a, b, c] = [name("ra"), name("rb"), name("rc")];
+        await makeItem([a]);
+        await makeItem([a, b]);
+        const tags = [a, b, c];
+        const initial = await snapshot(tags);
+        const first = await rename(a, b);
+        const second = await rename(b, c);
+        const third = await run([{ kind: "remove", tag: await ref(c) }]);
+
+        const result = await undoTo(libraryID, first.journalId);
+        assert.deepEqual(result, { ok: true, steps: 3 });
+        assert.deepEqual(await snapshot(tags), initial);
+        for (const id of [first, second, third].map((r) => r.journalId)) {
+          assert.equal((await readJournal(id)).status, "undone");
+        }
+      },
+    );
+
+    itx("passes over runs that were undone already", async function () {
+      const [a, b, c] = [name("sa"), name("sb"), name("sc")];
       await makeItem([a]);
-      const goneItem = await makeItem([gone]);
-      const allTags = await loadTags(libraryID);
-      const ops: Op[] = [
-        { kind: "rename", from: await ref(a), to: b },
-        { kind: "rename", from: await ref(gone), to: name("rh") },
-      ];
-      goneItem.removeTag(gone);
-      await goneItem.saveTx();
-      const result = await applyOps({ libraryID, allTags, ops });
-      assert.equal(result.skippedTasks, 1);
+      const initial = await snapshot([a, b, c]);
+      const first = await rename(a, b);
+      const second = await rename(b, c);
+      assert.isTrue((await undoJournal(second.journalId)).ok);
 
-      const undone = await undoJournal(result.journalId);
-
-      // a and b changed back; the skipped rename's names did not change.
-      assert.deepEqual(undone, { ok: true, restoredTags: 2 });
+      const result = await undoTo(libraryID, first.journalId);
+      assert.deepEqual(result, { ok: true, steps: 1 });
+      assert.deepEqual(await snapshot([a, b, c]), initial);
     });
+
+    itx(
+      "stops at a run whose tags changed since, and goes on when it is forced",
+      async function () {
+        const [a, b, c] = [name("da"), name("db"), name("dc")];
+        await makeItem([a]);
+        const later = await makeItem([]);
+        const initial = await snapshot([a, b, c]);
+        const first = await rename(a, b);
+        // Changed between the two runs: undoing the second one restores b
+        // on `later` too, which then differs from the first run's `after`.
+        later.addTag(b);
+        await later.saveTx();
+        const second = await rename(b, c);
+
+        const refused = await undoTo(libraryID, first.journalId);
+        assert.deepInclude(refused, {
+          ok: false,
+          reason: "drifted",
+          journalID: first.journalId,
+          steps: 1,
+        });
+        assert.equal((await readJournal(second.journalId)).status, "undone");
+
+        const forced = await undoTo(libraryID, first.journalId, {
+          forceRun: first.journalId,
+        });
+        assert.deepEqual(forced, { ok: true, steps: 1 });
+        assert.deepEqual(await snapshot([a, b, c]), initial);
+      },
+    );
+
+    describe("edge cases", function () {
+      itx(
+        "undoes and redoes ten runs in one go, and parts of them",
+        async function () {
+          this.timeout(120000);
+          const tags = Array.from({ length: 11 }, () => name("deep"));
+          await makeItem([tags[0]]);
+          await makeItem([tags[0]]);
+          // states[i]: before run i; states[10]: after the last one.
+          const states = [await snapshot(tags)];
+          const ids: string[] = [];
+          for (let i = 0; i < 10; i++) {
+            ids.push((await rename(tags[i], tags[i + 1])).journalId);
+            states.push(await snapshot(tags));
+          }
+
+          assert.deepEqual(await undoTo(libraryID, ids[0]), {
+            ok: true,
+            steps: 10,
+          });
+          assert.deepEqual(await snapshot(tags), states[0]);
+          assert.deepEqual(await redoTo(libraryID, ids[9]), {
+            ok: true,
+            steps: 10,
+          });
+          assert.deepEqual(await snapshot(tags), states[10]);
+          assert.deepEqual(await undoTo(libraryID, ids[5]), {
+            ok: true,
+            steps: 5,
+          });
+          assert.deepEqual(await snapshot(tags), states[5]);
+          assert.deepEqual(await redoTo(libraryID, ids[7]), {
+            ok: true,
+            steps: 3,
+          });
+          assert.deepEqual(await snapshot(tags), states[8]);
+          // ids[8] and ids[9] are still undone and can be redone later.
+          const { entries } = await listHistory(libraryID);
+          const status = (id: string) =>
+            entries.find((e) => e.id === id)?.status;
+          assert.equal(status(ids[8]), "undone");
+          assert.equal(status(ids[7]), "done");
+        },
+      );
+
+      itx(
+        "undoes and redoes a retype and a removal of a colored tag",
+        async function () {
+          const [x, z] = [name("tx"), name("tz")];
+          await makeItem([x]);
+          await makeItem([{ tag: x, type: 1 }]);
+          await makeItem([z]);
+          await color(z, "#0000FF");
+          const retype = await applyOps({
+            libraryID,
+            ops: [{ kind: "retype", tag: await ref(x, 1), toType: 0 }],
+            allTags: await loadTags(libraryID),
+            kind: "duplicates",
+          });
+          const remove = await run([{ kind: "remove", tag: await ref(z) }]);
+          assert.deepEqual(await typesOf(libraryID, x), [0]);
+          assert.isUndefined(colorOf(z));
+
+          assert.deepEqual(await undoTo(libraryID, retype.journalId), {
+            ok: true,
+            steps: 2,
+          });
+          assert.sameMembers(await typesOf(libraryID, x), [0, 1]);
+          assert.deepEqual(await typesOf(libraryID, z), [0]);
+          assert.equal(colorOf(z), "#0000FF");
+
+          assert.deepEqual(await redoTo(libraryID, remove.journalId), {
+            ok: true,
+            steps: 2,
+          });
+          assert.deepEqual(await typesOf(libraryID, x), [0]);
+          assert.deepEqual(await typesOf(libraryID, z), []);
+          assert.isUndefined(colorOf(z));
+        },
+      );
+
+      itx(
+        "copes with an item erased between the run, the undo and the redo",
+        async function () {
+          const [x, y] = [name("ex"), name("ey")];
+          const kept = await makeItem([x]);
+          const first = await makeItem([x]);
+          const result = await rename(x, y);
+          await first.eraseTx();
+
+          assert.deepEqual(await undoJournal(result.journalId), {
+            ok: false,
+            reason: "drifted",
+            driftedTags: [y],
+          });
+          assert.deepEqual(
+            await undoJournal(result.journalId, { force: true }),
+            { ok: true },
+          );
+          assert.isTrue(kept.hasTag(x) && !kept.hasTag(y));
+
+          // `before` still lists the erased item: redo sees x as changed.
+          assert.deepEqual(await redoJournal(result.journalId), {
+            ok: false,
+            reason: "drifted",
+            driftedTags: [x],
+          });
+          assert.deepEqual(
+            await redoJournal(result.journalId, { force: true }),
+            { ok: true },
+          );
+          assert.isTrue(kept.hasTag(y) && !kept.hasTag(x));
+        },
+      );
+
+      itx(
+        "lists every status change at once, even within one second",
+        async function () {
+          const [x, y] = [name("cx"), name("cy")];
+          await makeItem([x]);
+          const result = await rename(x, y);
+          const status = async () =>
+            (await listHistory(libraryID)).entries.find(
+              (e) => e.id === result.journalId,
+            )?.status;
+          assert.equal(await status(), "done"); // now cached
+          // File systems that keep modification times to the second (FAT,
+          // network drives) must not serve the cached summary.
+          assert.isTrue((await undoJournal(result.journalId)).ok);
+          assert.equal(await status(), "undone");
+          assert.isTrue((await redoJournal(result.journalId)).ok);
+          assert.equal(await status(), "done");
+        },
+      );
+
+      itx("leaves another library's undone runs alone", async function () {
+        const otherID = `${newJournalID()}-other`;
+        await writeJournal({
+          version: 1,
+          id: otherID,
+          createdAt: new Date().toISOString(),
+          libraryID: -1,
+          status: "undone",
+          undoneStatus: "done",
+          tasks: [],
+          completedTasks: 0,
+          before: [],
+          after: [],
+        });
+        try {
+          const x = name("ox");
+          await makeItem([x]);
+          const result = await rename(x, name("oy"));
+          assert.notEqual(result.journalId, "");
+
+          assert.equal((await readJournal(otherID)).status, "undone");
+          const ids = (await listHistory(libraryID)).entries.map((e) => e.id);
+          assert.notInclude(ids, otherID);
+          assert.include(
+            (await listHistory(-1)).entries.map((e) => e.id),
+            otherID,
+          );
+        } finally {
+          await deleteJournal(otherID);
+        }
+      });
+
+      itx("takes nothing when the selected run is gone", async function () {
+        const [x, y] = [name("gx"), name("gy")];
+        await makeItem([x]);
+        const result = await rename(x, y);
+        assert.isTrue((await undoJournal(result.journalId)).ok);
+        await deleteJournal(result.journalId);
+
+        assert.deepEqual(await redoTo(libraryID, result.journalId), {
+          ok: false,
+          reason: "not-found",
+        });
+        assert.deepEqual(await typesOf(libraryID, x), [0]);
+      });
+    });
+
+    itx("reports a run that is no longer kept", async function () {
+      assert.deepEqual(await undoTo(libraryID, "missing"), {
+        ok: false,
+        reason: "not-found",
+      });
+    });
+
+    itx(
+      "redo brings back the run's tags, types, colors and status",
+      async function () {
+        const [x, y] = [name("ya"), name("yb")];
+        await makeItem([{ tag: x, type: 1 }]);
+        await makeItem([y]);
+        await color(x, "#00FF00");
+        const state = async () =>
+          (await captureStates(libraryID, [x, y])).map((t) => ({
+            name: t.name,
+            color: t.color?.color,
+            items: t.items.map((i) => `${i.id}:${i.type}`).sort(),
+          }));
+        const initial = await state();
+        const result = await rename(x, y, 1);
+        const applied = await state();
+        // A cancelled run keeps that status through undo and redo.
+        const journal = await readJournal(result.journalId);
+        journal.status = "cancelled";
+        await writeJournal(journal);
+
+        assert.deepEqual(await undoJournal(result.journalId), { ok: true });
+        assert.deepEqual(await state(), initial);
+        assert.deepEqual(await redoJournal(result.journalId), { ok: true });
+        assert.deepEqual(await state(), applied);
+        const redone = await readJournal(result.journalId);
+        assert.equal(redone.status, "cancelled");
+        assert.notProperty(redone, "undoneStatus");
+        assert.deepEqual(await redoJournal(result.journalId), {
+          ok: false,
+          reason: "not-undone",
+        });
+      },
+    );
+
+    itx(
+      "refuses to redo when the tags changed after the undo, unless forced",
+      async function () {
+        const [x, y] = [name("za"), name("zb")];
+        const item = await makeItem([x]);
+        const later = await makeItem([]);
+        const result = await rename(x, y);
+        assert.isTrue((await undoJournal(result.journalId)).ok);
+        later.addTag(x);
+        await later.saveTx();
+
+        assert.deepEqual(await redoJournal(result.journalId), {
+          ok: false,
+          reason: "drifted",
+          driftedTags: [x],
+        });
+        const forced = await redoJournal(result.journalId, { force: true });
+        assert.isTrue(forced.ok);
+        assert.isTrue(item.hasTag(y));
+        assert.isFalse(later.hasTag(x));
+      },
+    );
+
+    itx("cannot redo an interrupted run", async function () {
+      const [x, y] = [name("ia"), name("ib")];
+      await makeItem([x]);
+      const result = await rename(x, y);
+      const journal = await readJournal(result.journalId);
+      journal.status = "running";
+      delete journal.after;
+      await writeJournal(journal);
+      assert.isTrue((await undoJournal(result.journalId, { force: true })).ok);
+
+      const interrupted = { ok: false, reason: "interrupted" } as const;
+      assert.deepEqual(await redoJournal(result.journalId), interrupted);
+      assert.deepEqual(
+        await redoJournal(result.journalId, { force: true }),
+        interrupted,
+      );
+      assert.deepEqual(await redoTo(libraryID, result.journalId), {
+        ok: false,
+        reason: "not-found",
+      });
+    });
+
+    itx(
+      "redoes undone runs oldest first, up to the selected one",
+      async function () {
+        const [a, b, c] = [name("wa"), name("wb"), name("wc")];
+        await makeItem([a]);
+        await makeItem([a, b]);
+        const tags = [a, b, c];
+        const initial = await snapshot(tags);
+        const first = await rename(a, b);
+        const afterFirst = await snapshot(tags);
+        const second = await rename(b, c);
+        const afterSecond = await snapshot(tags);
+        assert.deepEqual(await undoTo(libraryID, first.journalId), {
+          ok: true,
+          steps: 2,
+        });
+
+        assert.deepEqual(await redoTo(libraryID, first.journalId), {
+          ok: true,
+          steps: 1,
+        });
+        assert.deepEqual(await snapshot(tags), afterFirst);
+        assert.equal((await readJournal(second.journalId)).status, "undone");
+        assert.deepEqual(await redoTo(libraryID, second.journalId), {
+          ok: true,
+          steps: 1,
+        });
+        assert.deepEqual(await snapshot(tags), afterSecond);
+
+        assert.deepEqual(await undoTo(libraryID, first.journalId), {
+          ok: true,
+          steps: 2,
+        });
+        assert.deepEqual(await snapshot(tags), initial);
+        assert.deepEqual(await redoTo(libraryID, second.journalId), {
+          ok: true,
+          steps: 2,
+        });
+        assert.deepEqual(await snapshot(tags), afterSecond);
+      },
+    );
+
+    itx(
+      "a new edit discards the undone runs, one that changed nothing does not",
+      async function () {
+        const [a, b, c, gone] = [
+          name("ka"),
+          name("kb"),
+          name("kc"),
+          name("kg"),
+        ];
+        await makeItem([a]);
+        await rename(a, b);
+        const second = await rename(b, c);
+        assert.isTrue((await undoJournal(second.journalId)).ok);
+
+        const goneItem = await makeItem([gone]);
+        const allTags = await loadTags(libraryID);
+        const from = await ref(gone);
+        goneItem.removeTag(gone);
+        await goneItem.saveTx();
+        const nothing = await applyOps({
+          libraryID,
+          allTags,
+          ops: [{ kind: "rename", from, to: name("kh") }],
+        });
+        assert.equal(nothing.journalId, "");
+        const ids = async () =>
+          (await listHistory(libraryID)).entries.map((e) => e.id);
+        assert.include(await ids(), second.journalId);
+
+        const third = await rename(b, name("kd"));
+        assert.notEqual(third.journalId, "");
+        assert.notInclude(await ids(), second.journalId);
+        assert.deepEqual(await redoTo(libraryID, second.journalId), {
+          ok: false,
+          reason: "not-found",
+        });
+      },
+    );
   });
 
   describe("tagStore", function () {

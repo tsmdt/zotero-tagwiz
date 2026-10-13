@@ -11,10 +11,11 @@
  *   │          │ .tw-pane-header     │ │ .tw-pane-header      │ │
  *   │          │ (filter, Select All)│ │ (library-wide note)  │ │
  *   │          │ tag list table      │ │ preview table        │ │
- *   │          │ (or duplicate       │ │                      │ │
- *   │          │  groups)            │ │                      │ │
+ *   │          │ (or duplicate       │ │ (History: how many   │ │
+ *   │          │  groups, or the     │ │  edits Undo/Redo do) │ │
+ *   │          │  History list)      │ │                      │ │
  *   │          └─────────────────────┘ └──────────────────────┘ │
- *   │ .tw-footer   impact + status | Undo | Close | Apply       │
+ *   │ .tw-footer   status | Close | Apply (History: undo, redo) │
  *   └───────────────────────────────────────────────────────────┘
  *
  * Colors are system colors, so the dialog follows light and dark mode.
@@ -37,6 +38,9 @@
   --tw-accent: AccentColor;
   --tw-warn: #b45309;
   --tw-error: #b91c1c;
+  /* Selected rows (tags to edit, the History run to undo or redo): light
+   * blue, darker in dark mode */
+  --tw-selected: color-mix(in srgb, #3b82f6 18%, Canvas);
 }
 
 /* Text fields and scroll boxes: white in light mode, the page color in dark
@@ -555,6 +559,25 @@ button:not(.tw-tab, .tw-sort-button):disabled {
 }
 
 tr.tw-blocked-row {
+  opacity: 0.55;
+}
+
+/* After the hover rule, which it overrides: a selected row stays blue */
+.tw-table tbody tr.tw-row-selected {
+  background: var(--tw-selected);
+}
+
+/* ---------------------------------------------------------------------------
+ * History tab: one row per kept edit. The row selected for Apply is blue
+ * (tw-row-selected, above); undone edits are dimmed.
+ * ------------------------------------------------------------------------- */
+
+.tw-table td.tw-nowrap {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+tr.tw-history-undone {
   opacity: 0.55;
 }
 

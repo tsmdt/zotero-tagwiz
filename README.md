@@ -14,7 +14,7 @@ In other words: its a plugin for cleaning up tags in bulk: change their case, re
   - [Rename & Merge](#rename--merge)
   - [Remove](#remove)
   - [Duplicates](#duplicates)
-  - [Undo](#undo)
+  - [Undo & History](#undo--history)
 - [Compatibility](#compatibility)
 - [Development](#development)
 - [License](#license)
@@ -63,11 +63,20 @@ Choose how strict the match is:
 
 Each group suggests a spelling to keep (the most used one); pick another one with the radio buttons, or untick the group to skip it. If the name you keep is used both as a manual and an automatic tag, the merged tags become manual. Below the groups, **Possible typos and plurals** lists near-matches, which are never merged automatically. **Merge…** sends a pair to the Rename & Merge tab so you can decide.
 
-### Undo
+### Undo & History
 
-Before the first change of every run, TagWiz saves a snapshot of the affected tags in a `tagwiz` folder inside your Zotero data directory. **Undo Latest Edit** restores the tags from the most recent run, including which items carry them, their manual or automatic type and their colors.
+Before the first change of every run, TagWiz saves a snapshot of the affected tags in a `tagwiz` folder inside your Zotero data directory. A snapshot holds which items carry the tags, their manual or automatic type and their colors. TagWiz keeps the snapshots of the last 10 runs of each library.
 
-Keep in mind that **only the latest run can be undone**, and each run only once. If the tags were changed again afterwards (for example by a sync), TagWiz lists them and asks before overwriting; restoring anyway cannot itself be undone. TagWiz keeps the snapshots of the last 10 runs of each library.
+The **History** tab lists every kept run of the library, newest first, with its date (`YYYY-MM-DD`), time (`HH:MM:SS`), type of edit (Change case, Rename, Merge, Clean duplicates or Remove) and the number of items whose tags it changed. Runs made before TagWiz recorded the type of edit show a case change as Rename.
+
+It works like undo and redo in a text editor. Select a run (it turns blue) and press **Apply**:
+
+- On a run that is applied, Apply **undoes** it: the tags return to how they were just before it. Every later run is undone too, newest first, so undoing an older run rolls the library back to that point.
+- On a run that is undone, Apply **redoes** it. Older undone runs are redone first, oldest first.
+
+Undone runs stay at the top of the list, dimmed. The pane on the right says what Apply will do, e.g. "Undoing 4 edits." **A new edit discards the undone runs**: they are deleted and can no longer be redone. A run that was interrupted (for example by a crash) can be undone but not redone.
+
+If a run's tags were changed in the meantime (for example by a sync), TagWiz lists them and asks before overwriting them; the overwritten changes cannot be brought back. It asks for each run separately; saying no stops there, and the runs undone or redone so far stay that way.
 
 Manual and automatic tags keep their type, and tag colors move with the tag. Changes sync like any other edit, so wait for a running sync to finish before editing tags, and keep a backup of your Zotero data before the first big run.
 
