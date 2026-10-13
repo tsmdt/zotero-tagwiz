@@ -5,8 +5,15 @@ import {
   unregisterLegacyMenus,
 } from "../src/modules/menus";
 import { TagWizDialog } from "../src/ui/dialog";
-import { listJournalIDs, readJournal } from "../src/zotero/journal";
-import { getColorList, typesOf } from "../src/zotero/tagStore";
+import { applyOps } from "../src/zotero/engine";
+import {
+  deleteJournal,
+  listJournalIDs,
+  newJournalID,
+  readJournal,
+  writeJournal,
+} from "../src/zotero/journal";
+import { getColorList, loadTags, typesOf } from "../src/zotero/tagStore";
 
 /**
  * UI tests: they open the real TagWiz window and drive the dialog through its
@@ -295,6 +302,27 @@ describe("dialog (in Zotero)", function () {
     assert.lengthOf(dialog.plan.rows, 0);
   });
 
+  it("highlights the selected tags", async function () {
+    const tag = name("hl");
+    await makeItem([tag]);
+    const { dialog } = await openDialog();
+    dialog.filter = tag;
+    dialog.renderAll();
+    const row = () => dialog.leftEl.querySelector("tbody tr") as HTMLElement;
+    const highlighted = () => row().classList.contains("tw-row-selected");
+    assert.isFalse(highlighted());
+
+    (row().querySelector("input") as HTMLInputElement).click();
+    assert.isTrue(highlighted());
+    (row().querySelector("input") as HTMLInputElement).click();
+    assert.isFalse(highlighted());
+
+    // Redrawn (e.g. by Select All or a reload): still marked.
+    dialog.selected = new Set([tag]);
+    dialog.renderAll();
+    assert.isTrue(highlighted());
+  });
+
   it("counts selected tags the filter hides", async function () {
     const [a, b] = [name("ha"), name("hb")];
     await makeItem([a, b]);
@@ -510,6 +538,270 @@ describe("dialog (in Zotero)", function () {
     await dialog.apply();
 
     assert.include(seen, "Apply 1 change to 1 item");
+  });
+
+  it("undoes and redoes edits on the History tab", async function () {
+    const [a, b] = [name("ha"), name("hb")];
+    const one = await makeItem([a]);
+    const two = await makeItem([b]);
+    const { dialog } = await openDialog();
+    dialog.confirm = () => true;
+    dialog.switchTab("unify");
+    dialog.selected = new Set([a]);
+    dialog.unifyTarget = b;
+    dialog.targetTouched = true;
+    dialog.refreshPlan();
+    await dialog.apply();
+    dialog.switchTab("remove");
+    dialog.selected = new Set([b]);
+    dialog.renderAll();
+    await dialog.apply();
+    const [removeID, mergeID] = (await listJournalIDs()).slice(0, 2);
+    assert.equal((await readJournal(mergeID)).kind, "merge");
+    assert.equal((await readJournal(removeID)).kind, "remove");
+
+    dialog.tab = "history";
+    await dialog.showHistory();
+    const cells = (row: Element) =>
+      [...row.querySelectorAll("td")].map((td) => td.textContent);
+    const rows = () => [...dialog.leftEl.querySelectorAll("tbody tr")];
+    const [removed, merged] = rows().slice(0, 2).map(cells);
+    assert.match(removed[1], /^\d{4}-\d{2}-\d{2}$/);
+    assert.match(removed[2], /^\d{2}:\d{2}:\d{2}$/);
+    assert.deepEqual(removed.slice(3, 5), ["Remove", "2"]);
+    assert.deepEqual(merged.slice(3, 5), ["Merge", "1"]);
+    const button = (label: string) =>
+      [...dialog.footerEl.querySelectorAll("button")].find(
+        (el) => el.textContent === label,
+      ) as HTMLButtonElement;
+    assert.isTrue(button("Apply").disabled, "nothing selected yet");
+    const selected = () => [
+      ...dialog.leftEl.querySelectorAll("tr.tw-row-selected"),
+    ];
+    /** The action the Apply button takes, without taking it. */
+    const applyAction = () => {
+      const step = dialog.stepHistory;
+      let action: string | undefined;
+      dialog.stepHistory = async (to: string) => {
+        action = to;
+      };
+      button("Apply").click();
+      dialog.stepHistory = step;
+      return action;
+    };
+    const summary = () => plain(dialog.previewEl.textContent ?? "");
+    assert.equal(cells(rows()[0])[5], "");
+    let seen = "";
+    dialog.confirm = (_title: string, text: string) => {
+      seen = plain(text);
+      return true;
+    };
+
+    // Undo the merge: the newer remove is undone first.
+    (rows()[1].querySelector("input") as HTMLInputElement).click();
+    assert.equal(dialog.historySelected, mergeID);
+    assert.deepEqual(selected(), [rows()[1]]);
+    assert.isFalse(button("Apply").disabled);
+    assert.equal(applyAction(), "undo");
+    assert.include(summary(), "Undoing 2 edits.");
+    await dialog.stepHistory("undo");
+
+    assert.include(seen, "the 1 edit made after it");
+    assert.isTrue(one.hasTag(a) && !one.hasTag(b));
+    assert.isTrue(two.hasTag(b) && !two.hasTag(a));
+    assert.equal((await readJournal(mergeID)).status, "undone");
+    assert.equal((await readJournal(removeID)).status, "undone");
+    assert.include(dialog.status.text, "Undone: 2 edits");
+    assert.isTrue(rows()[0].classList.contains("tw-history-undone"));
+    assert.isTrue(rows()[1].classList.contains("tw-history-undone"));
+    assert.equal(cells(rows()[0])[5], "undone");
+    assert.deepEqual(selected(), [], "the selection is cleared");
+
+    // Redo the remove: the older merge is redone first.
+    (rows()[0].querySelector("input") as HTMLInputElement).click();
+    assert.equal(dialog.historySelected, removeID);
+    assert.deepEqual(selected(), [rows()[0]]);
+    assert.equal(applyAction(), "redo");
+    assert.include(summary(), "Redoing 2 edits.");
+    await dialog.stepHistory("redo");
+
+    assert.include(seen, "the 1 undone edit before it");
+    assert.deepEqual(await typesOf(libraryID, a), []);
+    assert.deepEqual(await typesOf(libraryID, b), []);
+    assert.equal((await readJournal(mergeID)).status, "done");
+    assert.equal((await readJournal(removeID)).status, "done");
+    assert.include(dialog.status.text, "Redone: 2 edits");
+    assert.equal(cells(rows()[0])[5], "");
+  });
+
+  describe("History edge cases", function () {
+    /** Rename a tag through the engine, as the Rename & Merge tab does. */
+    async function renameRun(from: string, to: string) {
+      const allTags = await loadTags(libraryID);
+      const ref = allTags.find((t) => t.name === from)!;
+      const result = await applyOps({
+        libraryID,
+        allTags,
+        ops: [{ kind: "rename", from: ref, to }],
+        kind: "rename",
+      });
+      assert.notEqual(result.journalId, "");
+      return result.journalId;
+    }
+
+    async function openHistory() {
+      const { dialog } = await openDialog();
+      dialog.tab = "history";
+      await dialog.showHistory();
+      const rows = () =>
+        [...dialog.leftEl.querySelectorAll("tbody tr")] as HTMLElement[];
+      const select = (id: string) => {
+        const index = dialog.history.findIndex(
+          (e: { id: string }) => e.id === id,
+        );
+        (rows()[index].querySelector("input") as HTMLInputElement).click();
+      };
+      return { dialog, rows, select };
+    }
+
+    it("stops where the user declines and keeps what was undone", async function () {
+      const [x, y, z] = [name("sx"), name("sy"), name("sz")];
+      await makeItem([x]);
+      const outside = await makeItem([]);
+      const first = await renameRun(x, y);
+      // Changed outside TagWiz between the two runs: the first one drifts.
+      outside.addTag(y);
+      await outside.saveTx();
+      const second = await renameRun(y, z);
+      const { dialog, select } = await openHistory();
+      select(first);
+      const asked: string[] = [];
+      dialog.confirm = (_title: string, text: string) => {
+        asked.push(plain(text));
+        return asked.length === 1; // agree to start, decline the overwrite
+      };
+
+      await dialog.stepHistory("undo");
+
+      assert.lengthOf(asked, 2);
+      assert.include(asked[1], "These tags changed after the edit of");
+      assert.include(asked[1], y);
+      assert.include(
+        plain(dialog.status.text),
+        "Stopped after undoing 1 of 2 edits.",
+      );
+      assert.equal((await readJournal(second)).status, "undone");
+      assert.equal((await readJournal(first)).status, "done");
+    });
+
+    it("undoes an interrupted run after asking, but never offers to redo it", async function () {
+      const [x, y] = [name("ix"), name("iy")];
+      const item = await makeItem([x]);
+      const id = await renameRun(x, y);
+      const journal = await readJournal(id);
+      journal.status = "running";
+      delete journal.after;
+      await writeJournal(journal);
+      const { dialog, rows, select } = await openHistory();
+      assert.equal(
+        rows()[0].querySelectorAll("td")[5].textContent,
+        "interrupted",
+      );
+      select(id);
+      const asked: string[] = [];
+      dialog.confirm = (_title: string, text: string) => {
+        asked.push(plain(text));
+        return true;
+      };
+
+      await dialog.stepHistory("undo");
+
+      assert.include(asked[1], "was interrupted");
+      assert.isTrue(item.hasTag(x) && !item.hasTag(y));
+      const radio = rows()[0].querySelector("input") as HTMLInputElement;
+      assert.isTrue(radio.disabled, "an interrupted run cannot be redone");
+      assert.equal(rows()[0].querySelectorAll("td")[5].textContent, "undone");
+    });
+
+    it("warns about an unreadable snapshot the undo or redo would skip", async function () {
+      const [x, y, z] = [name("ux"), name("uy"), name("uz")];
+      await makeItem([x]);
+      const first = await renameRun(x, y);
+      // Sorts between the two runs; its library is unknown.
+      const brokenID = `${newJournalID()}-broken`;
+      const broken = PathUtils.join(
+        Zotero.DataDirectory.dir,
+        "tagwiz",
+        `${brokenID}.json`,
+      );
+      await IOUtils.writeUTF8(broken, '{"version": 1, "id": "trunc');
+      try {
+        const second = await renameRun(y, z);
+        const { dialog, select } = await openHistory();
+        assert.include(
+          plain(dialog.leftEl.textContent ?? ""),
+          "could not be read",
+        );
+        let seen = "";
+        dialog.confirm = (_title: string, text: string) => {
+          seen = plain(text);
+          return true;
+        };
+
+        select(first);
+        await dialog.stepHistory("undo");
+        assert.include(seen, "could not be read");
+
+        // Redoing the first run only does not pass the broken one.
+        select(first);
+        await dialog.stepHistory("redo");
+        assert.notInclude(seen, "could not be read");
+        select(second);
+        await dialog.stepHistory("redo");
+        assert.notInclude(seen, "could not be read", "nothing skipped");
+
+        // Undo both, then redo both: the broken one lies in between.
+        select(first);
+        await dialog.stepHistory("undo");
+        select(second);
+        seen = "";
+        await dialog.stepHistory("redo");
+        assert.include(seen, "could not be read");
+      } finally {
+        await IOUtils.remove(broken, { ignoreAbsent: true });
+      }
+    });
+
+    it("says so when the selected run is gone before Apply", async function () {
+      const [x, y] = [name("gx"), name("gy")];
+      await makeItem([x]);
+      const id = await renameRun(x, y);
+      const { dialog, select } = await openHistory();
+      select(id);
+      await deleteJournal(id);
+      dialog.confirm = () => true;
+
+      await dialog.stepHistory("undo");
+
+      assert.include(
+        plain(dialog.status.text),
+        "can no longer be undone or redone",
+      );
+      assert.deepEqual(await typesOf(libraryID, y), [0], "nothing changed");
+      assert.isUndefined(dialog.historySelected);
+    });
+  });
+
+  it("has the same footer buttons on every tab", async function () {
+    const { dialog } = await openDialog();
+    const labels = () =>
+      [...dialog.footerEl.querySelectorAll("button")].map(
+        (el) => el.textContent,
+      );
+    assert.deepEqual(labels(), ["Close", "Apply"]);
+    dialog.tab = "history";
+    await dialog.showHistory();
+    assert.deepEqual(labels(), ["Close", "Apply"]);
   });
 
   it("offers one survivor per name in a duplicate group", async function () {

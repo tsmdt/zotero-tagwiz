@@ -14,6 +14,7 @@ tab-case = Change Case
 tab-unify = Rename & Merge
 tab-remove = Remove
 tab-duplicates = Clean Duplicates
+tab-history = History
 
 filter-placeholder = Filter tags…
 select-shown = Select All
@@ -82,7 +83,6 @@ impact-library = Affects { $total } items in the library.
 apply = Apply
 cancel = Cancel
 close = Close
-undo-last = Undo Latest Edit
 
 confirm-title = Apply changes?
 confirm-body = Apply { $changes ->
@@ -96,7 +96,7 @@ confirm-body = Apply { $changes ->
        *[library] items in the trash included
     })?
 
-    A snapshot is saved first, so "Undo Latest Edit" can restore the previous state.
+    A snapshot is saved first, so you can undo this in the History tab.
 confirm-remove-title = Remove tags?
 confirm-remove-body = Remove { $count ->
         [one] this tag
@@ -111,7 +111,7 @@ confirm-remove-body = Remove { $count ->
 
     { $names }
 
-    A snapshot is saved first, so "Undo Latest Edit" can restore them.
+    A snapshot is saved first, so you can undo this in the History tab.
 confirm-remove-more = …and { $count } more
 sync-warning = A sync is running. Changing tags now may be overwritten or conflict.
 status-working = Applying change { $done } of { $total }…
@@ -120,24 +120,72 @@ status-skipped = { $count ->
         [one] 1 of them changed nothing: its tag is no longer used.
        *[other] { $count } of them changed nothing: their tags are no longer used.
     }
-status-cancelled = Cancelled after { $done } of { $total } changes. You can undo what was applied.
-status-failed = Stopped after { $done } of { $total } changes: { $error }. You can undo what was applied.
+status-cancelled = Cancelled after { $done } of { $total } changes. You can undo what was applied in the History tab.
+status-failed = Stopped after { $done } of { $total } changes: { $error }. You can undo what was applied in the History tab.
 status-error = Could not apply: { $error }
 status-plan-changed = Tags were changed elsewhere in Zotero, so the preview was updated. Review it and apply again.
 status-closing = Stopping after the current change, then closing…
 error-load = Could not load the tags: { $error }
 
-undo-confirm = Restore the tags changed by the last run to how they were before?
-undo-interrupted = The last run was interrupted, so TagWiz cannot tell whether its tags were changed again afterwards. Restore them to how they were before that run anyway? This cannot be undone.
-undo-drifted = These tags changed after the last run: { $tags }. Restoring now would overwrite those newer changes, and cannot be undone. Restore anyway?
-undo-unreadable-newer = A newer undo snapshot could not be read (it may have been damaged, e.g. by a crash). Undo would restore the older run from { $date } instead.
-undo-done = { $count ->
-        [one] Restored 1 tag.
-       *[other] Restored { $count } tags.
+history-title = Edit History
+history-col-date = Date
+history-col-time = Time
+history-col-kind = Edit Type
+history-col-items = Items
+history-col-status = Status
+history-kind-case = Change case
+history-kind-rename = Rename
+history-kind-merge = Merge
+history-kind-duplicates = Clean duplicates
+history-kind-remove = Remove
+history-status-undone = undone
+history-status-interrupted = interrupted
+history-empty = No edits yet.
+history-hint = To undo or redo certain edits, select them from the list below and click "Apply".
+history-select = Select an edit to undo or redo.
+history-unreadable = { $count ->
+        [one] 1 snapshot could not be read and is not listed.
+       *[other] { $count } snapshots could not be read and are not listed.
     }
-undo-none = There is nothing to undo.
-undo-already-undone = The last run was already undone.
-undo-not-done = The last run was not undone.
+history-undo-count = { $count ->
+        [one] Undoing 1 edit.
+       *[other] Undoing { $count } edits.
+    }
+history-redo-count = { $count ->
+        [one] Redoing 1 edit.
+       *[other] Redoing { $count } edits.
+    }
+history-undo = Undo
+history-redo = Redo
+history-undo-confirm = Return the tags to how they were before the edit of { $date } { $time }? { $count ->
+        [one] This undoes that edit.
+       *[other] This undoes that edit and { $later ->
+            [one] the 1 edit
+           *[other] the { $later } edits
+        } made after it.
+    }
+history-redo-confirm = Apply the edit of { $date } { $time } again? { $count ->
+        [one] This redoes that edit.
+       *[other] This redoes that edit and { $earlier ->
+            [one] the 1 undone edit
+           *[other] the { $earlier } undone edits
+        } before it.
+    }
+history-unreadable-skipped = A snapshot among these edits could not be read (it may have been damaged, e.g. by a crash). If it holds an edit of this library, that edit is skipped.
+history-undo-done = { $count ->
+        [one] Undone: 1 edit.
+       *[other] Undone: { $count } edits.
+    }
+history-redo-done = { $count ->
+        [one] Redone: 1 edit.
+       *[other] Redone: { $count } edits.
+    }
+history-drifted = These tags changed after the edit of { $date } { $time }: { $tags }. Undoing it now would overwrite those newer changes, and they cannot be brought back. Undo anyway?
+history-interrupted = The edit of { $date } { $time } was interrupted, so TagWiz cannot tell whether its tags were changed again afterwards. Return them to how they were before that edit anyway? Newer changes to them cannot be brought back.
+history-redo-drifted = These tags changed after the edit of { $date } { $time } was undone: { $tags }. Redoing it now would overwrite those changes, and they cannot be brought back. Redo anyway?
+history-undo-partial = Stopped after undoing { $done } of { $total } edits.
+history-redo-partial = Stopped after redoing { $done } of { $total } edits.
+history-not-found = That edit can no longer be undone or redone.
 error-read-only = This library is read-only.
 error-no-library = The library no longer exists.
 error-tags-not-loaded = Zotero has not finished loading tags.

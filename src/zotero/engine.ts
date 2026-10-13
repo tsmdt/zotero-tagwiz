@@ -1,9 +1,12 @@
+import { type EditKind, redoChain, undoChain } from "../core/history";
 import { affectedNames, Task, toTasks } from "../core/tasks";
 import type { Op, TagRef, TagType } from "../core/types";
 import { preflight } from "./guard";
 import {
   deleteJournal,
+  discardUndone,
   Journal,
+  listHistory,
   nextJournalID,
   pruneJournals,
   readJournal,
@@ -35,6 +38,8 @@ export interface ApplyOptions {
   ops: readonly Op[];
   /** Every tag of the library; used to validate that name-level tasks are complete. */
   allTags: readonly TagRef[];
+  /** Which tab the run came from, for the History tab. */
+  kind?: EditKind;
   onProgress?: (done: number, total: number, task: Task) => void;
   /** Polled between tasks only; a task is never interrupted half-way. */
   isCancelled?: () => boolean;
@@ -273,6 +278,7 @@ export async function applyOps(opts: ApplyOptions): Promise<ApplyResult> {
     createdAt: new Date().toISOString(),
     libraryID,
     status: "running",
+    kind: opts.kind,
     tasks,
     completedTasks: 0,
     before: await captureStates(libraryID, names),
@@ -329,12 +335,20 @@ export async function applyOps(opts: ApplyOptions): Promise<ApplyResult> {
   }
   if (journal.after && unchanged(journal.before, journal.after)) {
     // Nothing to undo (every task skipped, cancelled or failed before any
-    // change): the journal would only hide the previous run from Undo.
+    // change): the journal would only clutter History, and end the chain of
+    // runs that can be redone.
     try {
       await deleteJournal(journal.id);
       kept = false;
     } catch (e) {
       log("could not delete an empty journal", message(e));
+    }
+  }
+  if (kept) {
+    try {
+      await discardUndone(libraryID);
+    } catch (e) {
+      log("could not discard undone journals", message(e));
     }
   }
   try {
@@ -380,27 +394,36 @@ function unchanged(before: TagState[], after: TagState[]): boolean {
   });
 }
 
-export type UndoResult =
-  | { ok: true; restoredTags: number }
+export type StepResult =
+  | { ok: true }
   | { ok: false; reason: "drifted"; driftedTags: string[] }
   | { ok: false; reason: "interrupted" }
-  | { ok: false; reason: "already-undone" };
+  | { ok: false; reason: "already-undone" }
+  | { ok: false; reason: "not-undone" };
 
 /**
- * Restore the affected tags to their state before the run (membership, types,
- * colors). Refuses if those tags changed after the run, unless `force`.
- * A run that was interrupted (crash, quit) has no `after` snapshot, so changes
- * made since cannot be detected; it is only undone with `force`.
+ * Set the run's tags to one of its snapshots (membership, types, colors):
+ * `before` undoes it, `after` redoes it. Refuses if the tags are no longer
+ * in the other snapshot's state, i.e. changed since, unless `force`. A run
+ * that was interrupted (crash, quit) has no `after` snapshot: changes made
+ * since cannot be detected, so it is only undone with `force`, and it cannot
+ * be redone.
  */
-export async function undoJournal(
+async function moveJournal(
   journalID: string,
-  opts: { force?: boolean } = {},
-): Promise<UndoResult> {
+  to: "before" | "after",
+  opts: { force?: boolean },
+): Promise<StepResult> {
   const journal = await readJournal(journalID);
-  if (journal.status === "undone")
+  const undoing = to === "before";
+  if (undoing && journal.status === "undone")
     return { ok: false, reason: "already-undone" };
-  if (!journal.after && !opts.force)
+  if (!undoing && journal.status !== "undone")
+    return { ok: false, reason: "not-undone" };
+  if (!journal.after && (!undoing || !opts.force))
     return { ok: false, reason: "interrupted" };
+  const target = undoing ? journal.before : journal.after!;
+  const expected = undoing ? journal.after : journal.before;
 
   const guard = preflight(journal.libraryID);
   if (!guard.ok) throw new Error(`Cannot edit tags: ${guard.reason}`);
@@ -408,10 +431,10 @@ export async function undoJournal(
   const { libraryID } = journal;
   const names = journal.before.map((s) => s.name);
   const current = await captureStates(libraryID, names);
-  if (journal.after && !opts.force) {
-    const afterByName = new Map(journal.after.map((s) => [s.name, s]));
+  if (expected && !opts.force) {
+    const expectedByName = new Map(expected.map((s) => [s.name, s]));
     const drifted = current
-      .filter((s) => !sameState(s, afterByName.get(s.name)))
+      .filter((s) => !sameState(s, expectedByName.get(s.name)))
       .map((s) => s.name);
     if (drifted.length) {
       return { ok: false, reason: "drifted", driftedTags: drifted };
@@ -420,33 +443,23 @@ export async function undoJournal(
 
   // itemID -> (tag name -> type it must have afterwards, or null for "must not have")
   const wanted = new Map<number, Map<string, TagType | null>>();
-  /** Names whose items or color actually change back. */
-  const restored = new Set<string>();
   const want = (id: number, name: string, type: TagType | null) => {
     const perItem = wanted.get(id) ?? new Map<string, TagType | null>();
     perItem.set(name, type);
     wanted.set(id, perItem);
-    restored.add(name);
   };
   const currentByName = new Map(current.map((s) => [s.name, s]));
-  for (const before of journal.before) {
-    const color = currentByName.get(before.name)?.color;
-    if (
-      color?.color !== before.color?.color ||
-      color?.position !== before.color?.position
-    ) {
-      restored.add(before.name);
-    }
+  for (const goal of target) {
     const now = new Map(
-      (currentByName.get(before.name)?.items ?? []).map((x) => [x.id, x.type]),
+      (currentByName.get(goal.name)?.items ?? []).map((x) => [x.id, x.type]),
     );
-    const was = new Map(before.items.map((x) => [x.id, x.type]));
-    for (const [id, type] of was)
-      if (now.get(id) !== type) want(id, before.name, type);
-    for (const id of now.keys()) if (!was.has(id)) want(id, before.name, null);
+    const then = new Map(goal.items.map((x) => [x.id, x.type]));
+    for (const [id, type] of then)
+      if (now.get(id) !== type) want(id, goal.name, type);
+    for (const id of now.keys()) if (!then.has(id)) want(id, goal.name, null);
   }
 
-  log("undo", journalID, `${wanted.size} items`);
+  log(undoing ? "undo" : "redo", journalID, `${wanted.size} items`);
   await editItems(libraryID, [...wanted.keys()], (item) => {
     const changes = wanted.get(item.id)!;
     const tags = (item.getTags() as TagData[]).filter(
@@ -459,17 +472,113 @@ export async function undoJournal(
   });
   for (const name of names) await purgeTag(name);
 
-  // Colors: clear every affected name, then re-insert in original order so
+  // Colors: clear every affected name, then re-insert in snapshot order so
   // list positions line up again.
-  for (const s of journal.before) await setColor(libraryID, s.name, false);
-  const colored = journal.before
+  for (const s of target) await setColor(libraryID, s.name, false);
+  const colored = target
     .filter((s) => s.color)
     .sort((a, b) => a.color!.position - b.color!.position);
   for (const s of colored) {
     await setColor(libraryID, s.name, s.color!.color, s.color!.position);
   }
 
-  journal.status = "undone";
+  if (undoing) {
+    journal.undoneStatus = journal.status;
+    journal.status = "undone";
+  } else {
+    // Undone before redo existed: its original status was not kept.
+    journal.status = journal.undoneStatus ?? "done";
+    delete journal.undoneStatus;
+  }
   await writeJournal(journal);
-  return { ok: true, restoredTags: restored.size };
+  return { ok: true };
+}
+
+/** Return the run's tags to how they were before it (see moveJournal). */
+export function undoJournal(
+  journalID: string,
+  opts: { force?: boolean } = {},
+): Promise<StepResult> {
+  return moveJournal(journalID, "before", opts);
+}
+
+/** Return an undone run's tags to how it left them (see moveJournal). */
+export function redoJournal(
+  journalID: string,
+  opts: { force?: boolean } = {},
+): Promise<StepResult> {
+  return moveJournal(journalID, "after", opts);
+}
+
+export type WalkResult =
+  | { ok: true; steps: number }
+  | {
+      ok: false;
+      reason: "drifted";
+      /** The run that was refused, and its changed tags. */
+      journalID: string;
+      driftedTags: string[];
+      /** Runs undone or redone before it stopped. */
+      steps: number;
+    }
+  | { ok: false; reason: "interrupted"; journalID: string; steps: number }
+  | { ok: false; reason: "not-found" };
+
+/**
+ * Undo or redo every run of the chain to `journalID` (see undoChain and
+ * redoChain), one by one. Stops at the first run refused (see moveJournal),
+ * keeping the steps taken. Calling again with that run as `forceRun` takes it
+ * anyway and goes on, as runs already taken drop out of the chain; the later
+ * ones are still checked.
+ */
+async function walk(
+  libraryID: number,
+  journalID: string,
+  direction: "undo" | "redo",
+  opts: { forceRun?: string },
+): Promise<WalkResult> {
+  const { entries } = await listHistory(libraryID);
+  const chain =
+    direction === "undo"
+      ? undoChain(entries, journalID)
+      : redoChain(entries, journalID);
+  if (!chain.length) return { ok: false, reason: "not-found" };
+  const step = direction === "undo" ? undoJournal : redoJournal;
+  let steps = 0;
+  for (const entry of chain) {
+    const result = await step(entry.id, { force: entry.id === opts.forceRun });
+    if (result.ok) {
+      steps++;
+    } else if (result.reason === "drifted") {
+      return {
+        ok: false,
+        reason: "drifted",
+        journalID: entry.id,
+        driftedTags: result.driftedTags,
+        steps,
+      };
+    } else if (result.reason === "interrupted") {
+      return { ok: false, reason: "interrupted", journalID: entry.id, steps };
+    }
+    // "already-undone" / "not-undone": taken meanwhile, e.g. in another window.
+  }
+  return { ok: true, steps };
+}
+
+/** Return the tags to before run `journalID`, undoing every newer run first. */
+export function undoTo(
+  libraryID: number,
+  journalID: string,
+  opts: { forceRun?: string } = {},
+): Promise<WalkResult> {
+  return walk(libraryID, journalID, "undo", opts);
+}
+
+/** Return the tags to after undone run `journalID`, redoing older ones first. */
+export function redoTo(
+  libraryID: number,
+  journalID: string,
+  opts: { forceRun?: string } = {},
+): Promise<WalkResult> {
+  return walk(libraryID, journalID, "redo", opts);
 }

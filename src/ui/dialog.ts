@@ -5,6 +5,14 @@ import {
   findFuzzyPairs,
   type FuzzyPair,
 } from "../core/duplicates";
+import {
+  EditKind,
+  formatDate,
+  formatTime,
+  historyAction,
+  redoChain,
+  undoChain,
+} from "../core/history";
 import type { DuplicateTier } from "../core/normalize";
 import {
   buildCasePlan,
@@ -22,9 +30,9 @@ import type {
   PlanRow,
   TagRef,
 } from "../core/types";
-import { applyOps, undoJournal } from "../zotero/engine";
+import { applyOps, redoTo, undoTo } from "../zotero/engine";
 import { preflight } from "../zotero/guard";
-import { findUndoable, latestUndoable } from "../zotero/journal";
+import { type HistoryEntry, listHistory } from "../zotero/journal";
 import { loadTags, measureImpact, type Scope } from "../zotero/tagStore";
 import { FluentMessageId } from "../../typings/i10n";
 import { getString } from "../utils/locale";
@@ -36,8 +44,8 @@ export interface DialogParams {
   collection?: { id: number; name: string };
 }
 
-type TabID = "case" | "unify" | "duplicates" | "remove";
-const TABS: TabID[] = ["case", "unify", "duplicates", "remove"];
+type TabID = "case" | "unify" | "duplicates" | "remove" | "history";
+const TABS: TabID[] = ["case", "unify", "duplicates", "remove", "history"];
 
 /** One listed tag name; `refs` are all of its types in the whole library. */
 interface NameRow {
@@ -117,7 +125,7 @@ function compareRows(key: SortKey): (a: NameRow, b: NameRow) => number {
 const MIN_COLUMN_WIDTH = 32;
 
 /** Tables whose columns the user can resize. */
-type ResizableTable = "tags" | "preview";
+type ResizableTable = "tags" | "preview" | "history";
 
 const MAX_FUZZY = 100;
 /** Rows rendered at most in the tag list and the preview (all still apply). */
@@ -220,7 +228,12 @@ export class TagWizDialog {
   private reloadTimer?: number;
   /** Bumped by every loadData; an older, slower one must not overwrite it. */
   private loadSeq = 0;
-  private canUndo = false;
+  /** This library's runs, newest first; loaded on the History tab only. */
+  private history: HistoryEntry[] = [];
+  /** Journals that could not be read; any of them may be this library's. */
+  private historyUnreadable: string[] = [];
+  /** The run whose "before" state Restore returns to. */
+  private historySelected?: string;
 
   private headerEl!: HTMLElement;
   private menuEl!: HTMLElement;
@@ -307,6 +320,7 @@ export class TagWizDialog {
     this.chosen.clear();
     this.unifyTarget = "";
     this.targetTouched = false;
+    this.historySelected = undefined;
     this.filter = "";
     // The collection column comes and goes.
     this.columnWidths = {};
@@ -414,7 +428,8 @@ export class TagWizDialog {
     const { libraryID, scope } = this;
     const allTags = await loadTags(libraryID);
     const scoped = scope ? await loadTags(libraryID, scope) : [];
-    const canUndo = !!(await latestUndoable(libraryID));
+    const history =
+      this.tab === "history" ? await listHistory(libraryID) : undefined;
     if (seq !== this.loadSeq) return false;
     const listed = scope ? scoped : allTags;
 
@@ -449,7 +464,13 @@ export class TagWizDialog {
     for (const name of [...this.selected]) {
       if (!existing.has(name)) this.selected.delete(name);
     }
-    this.canUndo = canUndo;
+    if (history) {
+      this.history = history.entries;
+      this.historyUnreadable = history.unreadable;
+      // Pruned, discarded, or undone or redone meanwhile.
+      if (!historyAction(history.entries, this.historySelected))
+        this.historySelected = undefined;
+    }
     this.fuzzy = undefined;
     this.recomputeGroups();
     return true;
@@ -487,6 +508,9 @@ export class TagWizDialog {
         break;
       case "remove":
         plan = buildRemovePlan(refs, this.allTags);
+        break;
+      case "history":
+        plan = { rows: [] };
         break;
       case "duplicates": {
         const active = this.groups.filter(
@@ -689,12 +713,30 @@ export class TagWizDialog {
     // task, which may be hidden by the filter or beyond the shown rows.
     if (id === "remove") this.selected.clear();
     this.tab = id;
-    this.renderAll();
+    if (id === "history") void this.showHistory();
+    else this.renderAll();
+  }
+
+  /** History is read when shown: runs, undos and pruning change it. */
+  private async showHistory() {
+    this.renderTabs();
+    try {
+      if (!(await this.loadData())) return;
+    } catch (e) {
+      Zotero.logError(e as Error);
+      this.setStatus(
+        getString("error-load", { args: { error: errorText(e) } }),
+        "error",
+      );
+      return;
+    }
+    if (this.alive && this.tab === "history") this.renderAll();
   }
 
   private renderLeft() {
     clear(this.leftEl);
     if (this.tab === "duplicates") this.renderDuplicates();
+    else if (this.tab === "history") this.renderHistory();
     else this.renderTagList();
   }
 
@@ -979,6 +1021,7 @@ export class TagWizDialog {
         onchange: () => {
           if (box.checked) this.selected.add(row.name);
           else this.selected.delete(row.name);
+          tr.classList.toggle("tw-row-selected", box.checked);
           updateCount();
           this.selectionChanged();
         },
@@ -990,25 +1033,24 @@ export class TagWizDialog {
         row.color ? swatch(doc, row.color) : null,
         row.name,
       );
-      tbody.appendChild(
+      const tr = h(
+        doc,
+        "tr",
+        { class: this.selected.has(row.name) ? "tw-row-selected" : "" },
+        h(doc, "td", { class: "tw-checkbox" }, box),
+        name,
         h(
           doc,
-          "tr",
-          {},
-          h(doc, "td", { class: "tw-checkbox" }, box),
-          name,
-          h(
-            doc,
-            "td",
-            { class: "tw-tag-type" },
-            getString(TAG_KINDS[row.type].label),
-          ),
-          this.scope
-            ? h(doc, "td", { class: "tw-count" }, row.scopeItems ?? 0)
-            : null,
-          h(doc, "td", { class: "tw-count" }, row.items),
+          "td",
+          { class: "tw-tag-type" },
+          getString(TAG_KINDS[row.type].label),
         ),
+        this.scope
+          ? h(doc, "td", { class: "tw-count" }, row.scopeItems ?? 0)
+          : null,
+        h(doc, "td", { class: "tw-count" }, row.items),
       );
+      tbody.appendChild(tr);
     }
     updateCount();
   }
@@ -1145,6 +1187,15 @@ export class TagWizDialog {
           "div",
           { class: "tw-hint", title: getString("remove-hint") },
           getString("remove-hint"),
+        ),
+      ]);
+    } else if (this.tab === "history") {
+      append(this.controlsEl, [
+        h(
+          doc,
+          "div",
+          { class: "tw-hint", title: getString("history-hint") },
+          getString("history-hint"),
         ),
       ]);
     } else if (this.tab === "duplicates") {
@@ -1347,9 +1398,150 @@ export class TagWizDialog {
     this.renderAll();
   }
 
+  /** The History tab's list: one row per kept run, newest first. */
+  private renderHistory() {
+    const { doc } = this;
+    const scroll = h(doc, "div", { class: "tw-scroll-box" });
+    if (!this.history.length) {
+      scroll.classList.add("tw-empty-box");
+      scroll.appendChild(
+        h(doc, "div", { class: "tw-list-notice" }, getString("history-empty")),
+      );
+    } else {
+      const header = (label: string, cls = "") => {
+        const th = h(doc, "th", { class: cls }, label);
+        th.appendChild(this.columnResizer("history", th));
+        return th;
+      };
+      const tbody = h(doc, "tbody");
+      for (const entry of this.history) {
+        const undone = entry.status === "undone";
+        const status = undone
+          ? getString("history-status-undone")
+          : entry.interrupted
+            ? getString("history-status-interrupted")
+            : "";
+        const classes = [
+          undone ? "tw-history-undone" : "",
+          entry.id === this.historySelected ? "tw-row-selected" : "",
+        ];
+        const row = h(
+          doc,
+          "tr",
+          { class: classes.filter(Boolean).join(" ") },
+          h(
+            doc,
+            "td",
+            { class: "tw-checkbox" },
+            h(doc, "input", {
+              type: "radio",
+              name: "tw-history",
+              checked: entry.id === this.historySelected,
+              // e.g. an interrupted run, which cannot be redone.
+              disabled: !historyAction(this.history, entry.id),
+              "aria-label": `${formatDate(entry.createdAt)} ${formatTime(entry.createdAt)}`,
+              onchange: () => {
+                this.historySelected = entry.id;
+                // Mark the row without redrawing the list (and its scroll).
+                for (const tr of tbody.children) {
+                  tr.classList.toggle("tw-row-selected", tr === row);
+                }
+                this.refreshPlan();
+              },
+            }),
+          ),
+          h(doc, "td", { class: "tw-nowrap" }, formatDate(entry.createdAt)),
+          h(doc, "td", { class: "tw-nowrap" }, formatTime(entry.createdAt)),
+          h(
+            doc,
+            "td",
+            {},
+            getString(`history-kind-${entry.kind}` as FluentMessageId),
+          ),
+          h(doc, "td", { class: "tw-count" }, entry.items),
+          h(doc, "td", { class: "tw-tag-type" }, status),
+        );
+        tbody.appendChild(row);
+      }
+      const table = h(
+        doc,
+        "table",
+        { class: "tw-table tw-history-table" },
+        h(
+          doc,
+          "thead",
+          {},
+          h(
+            doc,
+            "tr",
+            {},
+            h(doc, "th", { class: "tw-checkbox" }),
+            header(getString("history-col-date")),
+            header(getString("history-col-time")),
+            header(getString("history-col-kind")),
+            header(getString("history-col-items"), "tw-count"),
+            header(getString("history-col-status")),
+          ),
+        ),
+        tbody,
+      );
+      scroll.appendChild(table);
+    }
+    if (this.historyUnreadable.length) {
+      scroll.appendChild(
+        h(
+          doc,
+          "div",
+          { class: "tw-hint tw-list-notice" },
+          getString("history-unreadable", {
+            args: { count: this.historyUnreadable.length },
+          }),
+        ),
+      );
+    }
+    append(this.leftEl, [
+      h(
+        doc,
+        "div",
+        { class: "tw-pane-header" },
+        h(doc, "span", { class: "tw-pane-title" }, getString("history-title")),
+      ),
+      scroll,
+    ]);
+    // Once in the document: it reads the headers' computed padding.
+    const table = scroll.querySelector("table");
+    if (table) this.applyColumnWidths("history", table);
+  }
+
+  /** What the selected run allows, and the runs that would take. */
+  private historyChain(): {
+    action?: "undo" | "redo";
+    chain: HistoryEntry[];
+  } {
+    const id = this.historySelected;
+    const action = historyAction(this.history, id);
+    if (!action || id === undefined) return { chain: [] };
+    const chain =
+      action === "undo"
+        ? undoChain(this.history, id)
+        : redoChain(this.history, id);
+    return { action, chain };
+  }
+
+  /** The History tab's right pane: how many runs Undo or Redo would take. */
+  private historySummary(): string {
+    const { action, chain } = this.historyChain();
+    if (!action) return getString("history-select");
+    return getString(
+      action === "undo" ? "history-undo-count" : "history-redo-count",
+      { args: { count: chain.length } },
+    );
+  }
+
   private renderPreview() {
     const { doc } = this;
     clear(this.previewEl);
+    // Always empty on the History tab, which has no plan.
     const rows = this.displayRows();
     const head = h(
       doc,
@@ -1368,7 +1560,9 @@ export class TagWizDialog {
             doc,
             "div",
             { class: "tw-list-notice" },
-            getString("preview-empty"),
+            this.tab === "history"
+              ? this.historySummary()
+              : getString("preview-empty"),
           ),
         ),
       ]);
@@ -1540,46 +1734,43 @@ export class TagWizDialog {
         this.status.text,
       ),
     );
-    const undo = h(
-      doc,
-      "button",
-      {
-        type: "button",
-        disabled: this.busy || !this.canUndo,
-        onclick: () => void this.undo(),
-      },
-      getString("undo-last"),
-    );
-    const apply = this.busy
-      ? h(
-          doc,
-          "button",
-          {
-            type: "button",
-            onclick: () => {
-              this.cancelRequested = true;
+    // On History, Apply undoes or redoes, whichever the selected run allows.
+    const history = this.tab === "history";
+    const { action } = this.historyChain();
+    const apply =
+      this.busy && !history
+        ? h(
+            doc,
+            "button",
+            {
+              type: "button",
+              onclick: () => {
+                this.cancelRequested = true;
+              },
             },
-          },
-          getString("cancel"),
-        )
-      : h(
-          doc,
-          "button",
-          {
-            type: "button",
-            class: "tw-primary-button",
-            disabled: !ops.length,
-            onclick: () => void this.apply(),
-          },
-          getString("apply"),
-        );
+            getString("cancel"),
+          )
+        : h(
+            doc,
+            "button",
+            {
+              type: "button",
+              class: "tw-primary-button",
+              disabled: history ? this.busy || !action : !ops.length,
+              onclick: () =>
+                void (action && history
+                  ? this.stepHistory(action)
+                  : this.apply()),
+            },
+            getString("apply"),
+          );
     const close = h(
       doc,
       "button",
       { type: "button", disabled: this.busy, onclick: () => this.win.close() },
       getString("close"),
     );
-    append(this.footerEl, [info, undo, close, apply]);
+    append(this.footerEl, [info, close, apply]);
   }
 
   private setStatus(text: string, kind: "info" | "error" = "info") {
@@ -1679,6 +1870,7 @@ export class TagWizDialog {
         libraryID: this.libraryID,
         ops,
         allTags: this.allTags,
+        kind: this.editKind(),
         isCancelled: () => this.cancelRequested,
         onProgress: (done, total) =>
           this.setStatus(
@@ -1722,6 +1914,21 @@ export class TagWizDialog {
     }
   }
 
+  /** The History tab's label for a run of the current plan. */
+  private editKind(): EditKind {
+    switch (this.tab) {
+      case "unify":
+        // Several sources, or one renamed to a name already in use.
+        return this.plan.rows.some((r) => r.included && r.merges)
+          ? "merge"
+          : "rename";
+      case "history":
+        throw new Error("The History tab has no plan to apply");
+      default:
+        return this.tab;
+    }
+  }
+
   /** Confirmation for a Remove run: says it deletes, and names the tags. */
   private removeConfirmText(
     names: string[],
@@ -1746,7 +1953,7 @@ export class TagWizDialog {
     });
   }
 
-  /** Re-render after apply/undo, or close if the user asked to meanwhile. */
+  /** Re-render after apply, undo or redo, or close if the user asked to meanwhile. */
   private async afterAction(changed: boolean) {
     if (this.closeWhenDone) {
       if (this.alive) this.win.close();
@@ -1757,53 +1964,86 @@ export class TagWizDialog {
     }
   }
 
-  private async undo() {
-    if (this.busy) return;
+  /**
+   * Undo the selected run and every newer one, or redo the undone runs up to
+   * the selected one. A run whose tags changed since, or that was
+   * interrupted, is only taken once the user agrees; declining stops there.
+   */
+  private async stepHistory(action: "undo" | "redo") {
+    const id = this.historySelected;
+    if (this.busy || !id) return;
     this.setBusy(true);
     let started = false;
+    const undo = action === "undo";
     try {
-      const { journal, unreadable } = await findUndoable(this.libraryID);
-      if (!journal) {
-        this.setStatus(getString("undo-none"));
+      const target = this.history.find((e) => e.id === id);
+      const chain = this.historyChain();
+      if (!target || chain.action !== action) {
+        this.setStatus(getString("history-not-found"), "error");
         return;
       }
-      let text = getString("undo-confirm");
-      // A newer snapshot may be this library's real latest run (e.g. one
-      // damaged by a crash): say which run would be undone instead.
-      if (unreadable.length)
-        text = `${getString("undo-unreadable-newer", {
-          args: { date: new Date(journal.createdAt).toLocaleString() },
-        })}\n\n${text}`;
+      const total = chain.chain.length;
+      const when = (entry: HistoryEntry) => ({
+        date: formatDate(entry.createdAt),
+        time: formatTime(entry.createdAt),
+      });
+      let text = undo
+        ? getString("history-undo-confirm", {
+            args: { ...when(target), count: total, later: total - 1 },
+          })
+        : getString("history-redo-confirm", {
+            args: { ...when(target), count: total, earlier: total - 1 },
+          });
+      // IDs sort by time: an unreadable newer run may be one of this
+      // library's, which undoing or redoing would then skip: any newer one
+      // for undo, any between the oldest redone run and the target for redo.
+      const oldest = undo ? target.id : chain.chain[0].id;
+      const skipped = this.historyUnreadable.some(
+        (u) => u > oldest && (undo || u < target.id),
+      );
+      if (skipped)
+        text = `${getString("history-unreadable-skipped")}\n\n${text}`;
       const guard = preflight(this.libraryID);
       if (guard.ok && guard.warnings.includes("sync-in-progress"))
         text += `\n\n${getString("sync-warning")}`;
-      if (this.closeWhenDone || !this.confirm(getString("undo-last"), text))
-        return;
+      const title = getString(undo ? "history-undo" : "history-redo");
+      if (this.closeWhenDone || !this.confirm(title, text)) return;
       started = true;
-      let result = await undoJournal(journal.id);
-      if (!result.ok && result.reason !== "already-undone") {
+      const walk = undo ? undoTo : redoTo;
+      let steps = 0;
+      let result = await walk(this.libraryID, id);
+      while (!result.ok && result.reason !== "not-found") {
+        steps += result.steps;
+        const refused = result;
+        const entry = this.history.find((e) => e.id === refused.journalID);
+        const args = entry ? when(entry) : { date: "", time: "" };
+        const tags = refused.reason === "drifted" ? refused.driftedTags : [];
         const question =
-          result.reason === "drifted"
-            ? getString("undo-drifted", {
-                args: { tags: result.driftedTags.slice(0, 10).join(", ") },
-              })
-            : getString("undo-interrupted");
-        if (!this.confirm(getString("undo-last"), question)) return;
-        result = await undoJournal(journal.id, { force: true });
+          refused.reason === "interrupted"
+            ? getString("history-interrupted", { args })
+            : getString(undo ? "history-drifted" : "history-redo-drifted", {
+                args: { ...args, tags: tags.slice(0, 10).join(", ") },
+              });
+        if (this.closeWhenDone || !this.confirm(title, question)) {
+          this.setStatus(
+            getString(undo ? "history-undo-partial" : "history-redo-partial", {
+              args: { done: steps, total },
+            }),
+            "error",
+          );
+          return;
+        }
+        result = await walk(this.libraryID, id, {
+          forceRun: refused.journalID,
+        });
       }
       if (result.ok)
         this.setStatus(
-          getString("undo-done", { args: { count: result.restoredTags } }),
+          getString(undo ? "history-undo-done" : "history-redo-done", {
+            args: { count: steps + result.steps },
+          }),
         );
-      else
-        this.setStatus(
-          getString(
-            result.reason === "already-undone"
-              ? "undo-already-undone"
-              : "undo-not-done",
-          ),
-          "error",
-        );
+      else this.setStatus(getString("history-not-found"), "error");
     } catch (e) {
       this.setStatus(
         getString("status-error", { args: { error: errorText(e) } }),
@@ -1811,6 +2051,7 @@ export class TagWizDialog {
       );
     } finally {
       this.setBusy(false);
+      if (started) this.historySelected = undefined;
       await this.afterAction(started);
     }
   }

@@ -1,3 +1,4 @@
+import { affectedItemCount, EditKind, editKindOf } from "../core/history";
 import type { Task } from "../core/tasks";
 import type { TagState } from "./tagStore";
 
@@ -12,7 +13,7 @@ export type JournalStatus =
  * Record of one apply run: what was asked, what the affected tags looked like
  * before and after. Written to disk before the first change and updated after
  * every task, so a crash still leaves a record that can be undone from
- * `before` (`after` is then missing, see undoJournal).
+ * `before` (`after` is then missing, see undoJournal; it cannot be redone).
  */
 export interface Journal {
   version: 1;
@@ -20,6 +21,10 @@ export interface Journal {
   createdAt: string;
   libraryID: number;
   status: JournalStatus;
+  /** The status an undo replaced, put back by a redo. */
+  undoneStatus?: JournalStatus;
+  /** Missing in journals written before it was recorded; see editKindOf. */
+  kind?: EditKind;
   tasks: Task[];
   completedTasks: number;
   error?: string;
@@ -106,13 +111,22 @@ export async function writeJournal(journal: Journal): Promise<void> {
   await IOUtils.makeDirectory(dirPath(), { ignoreExisting: true });
   const path = filePath(journal.id);
   await IOUtils.writeJSON(path, journal, { tmpPath: path + TMP_SUFFIX });
+  // Not only the file's modification time: some file systems (FAT, network
+  // drives) keep it to the second, so an undo and a redo within one second
+  // would leave the summary of the first.
+  summaries.delete(journal.id);
 }
 
 /** Remove a journal, e.g. one of a run that changed nothing. */
 export async function deleteJournal(id: string): Promise<void> {
   await IOUtils.remove(filePath(id), { ignoreAbsent: true });
+  forget(id);
+}
+
+/** Drop a removed journal from the caches. */
+function forget(id: string) {
   libraryOf.delete(id);
-  parsed.delete(id);
+  summaries.delete(id);
 }
 
 function isTagState(value: any): boolean {
@@ -139,6 +153,9 @@ function checkJournal(value: any): Journal {
     typeof value.createdAt === "string" &&
     Number.isInteger(value.libraryID) &&
     typeof value.status === "string" &&
+    (value.kind === undefined || typeof value.kind === "string") &&
+    (value.undoneStatus === undefined ||
+      typeof value.undoneStatus === "string") &&
     Array.isArray(value.tasks) &&
     Number.isInteger(value.completedTasks) &&
     Array.isArray(value.before) &&
@@ -202,8 +219,7 @@ export async function pruneJournals(): Promise<void> {
       continue;
     }
     await IOUtils.remove(filePath(id), { ignoreAbsent: true });
-    libraryOf.delete(id);
-    parsed.delete(id);
+    forget(id);
   }
   if (!(await IOUtils.exists(dirPath()))) return;
   for (const path of (await IOUtils.getChildren(dirPath())) as string[]) {
@@ -213,77 +229,76 @@ export async function pruneJournals(): Promise<void> {
   }
 }
 
-export interface UndoCandidate {
-  /**
-   * Latest journal of the library, unless that one was already undone.
-   * Shared with a cache: read it, don't modify it (use readJournal to edit).
-   */
-  journal?: Journal;
-  /**
-   * IDs of unreadable journals newer than `journal`. Their library is
-   * unknown, so any of them may be this library's latest run: undoing
-   * `journal` would then revert an older run than the user expects.
-   */
+/** One run as the History tab lists it. */
+export interface HistoryEntry {
+  id: string;
+  createdAt: string;
+  kind: EditKind;
+  /** Items whose tags the run changed (see affectedItemCount). */
+  items: number;
+  status: JournalStatus;
+  /** No `after` snapshot: the run was cut short by a crash or quit. */
+  interrupted: boolean;
+}
+
+export interface History {
+  /** This library's runs, newest first. */
+  entries: HistoryEntry[];
+  /** Journals that could not be read; any of them may be this library's. */
   unreadable: string[];
 }
 
-/** Recently parsed journals by ID, with their file's modification time. */
-const parsed = new Map<string, { modified: number; journal: Journal }>();
-const PARSED_KEEP = 4;
-
 /**
- * readFile, but a file that has not changed since it was last parsed is not
- * parsed again: the dialog asks for the latest journal on every reload, and
- * journals can be megabytes.
+ * Summaries by journal ID, with their file's modification time: History is
+ * listed on every reload, and journals can be megabytes.
  */
-async function readFileCached(id: string): Promise<Journal> {
-  const modified = (await IOUtils.stat(filePath(id))).lastModified;
-  const hit = parsed.get(id);
-  if (hit && modified !== undefined && hit.modified === modified) {
-    return hit.journal;
-  }
-  const journal = await readFile(id);
-  libraryOf.set(id, journal.libraryID);
-  parsed.delete(id);
-  if (modified === undefined) return journal;
-  parsed.set(id, { modified, journal });
-  for (const old of parsed.keys()) {
-    if (parsed.size <= PARSED_KEEP) break;
-    parsed.delete(old);
-  }
-  return journal;
+const summaries = new Map<string, { modified: number; entry: HistoryEntry }>();
+
+function summarize(journal: Journal): HistoryEntry {
+  return {
+    id: journal.id,
+    createdAt: journal.createdAt,
+    kind: editKindOf(journal),
+    items: affectedItemCount(journal.before, journal.after),
+    status: journal.status,
+    interrupted: !journal.after,
+  };
 }
 
-/** The library's latest journal, and the unreadable ones found before it. */
-export async function findUndoable(libraryID: number): Promise<UndoCandidate> {
+/** Every kept run of the library, newest first. */
+export async function listHistory(libraryID: number): Promise<History> {
+  const entries: HistoryEntry[] = [];
   const unreadable: string[] = [];
   for (const id of await listJournalIDs()) {
-    // A journal already known to be another library's is not parsed again.
     const library = libraryOf.get(id);
     if (library !== undefined && library !== libraryID) continue;
-    let journal: Journal;
     try {
-      journal = await readFileCached(id);
+      const modified = (await IOUtils.stat(filePath(id))).lastModified;
+      const hit = summaries.get(id);
+      if (hit && modified !== undefined && hit.modified === modified) {
+        entries.push(hit.entry);
+        continue;
+      }
+      const journal = await readFile(id);
+      libraryOf.set(id, journal.libraryID);
+      if (journal.libraryID !== libraryID) continue;
+      const entry = summarize(journal);
+      if (modified !== undefined) summaries.set(id, { modified, entry });
+      entries.push(entry);
     } catch (e) {
       Zotero.debug(`[TagWiz] unreadable journal ${id}: ${e}`);
       unreadable.push(id);
-      continue;
     }
-    if (journal.libraryID !== libraryID) continue;
-    return {
-      journal: journal.status === "undone" ? undefined : journal,
-      unreadable,
-    };
   }
-  return { unreadable };
+  return { entries, unreadable };
 }
 
 /**
- * Latest journal that can still be undone, if any. Unreadable files are
- * passed over; use findUndoable to learn about them.
+ * Delete the library's undone runs: a new edit was made on top of their
+ * state, so they can no longer be redone (see redoChain).
  */
-export async function latestUndoable(
-  libraryID: number,
-): Promise<Journal | undefined> {
-  return (await findUndoable(libraryID)).journal;
+export async function discardUndone(libraryID: number): Promise<void> {
+  for (const entry of (await listHistory(libraryID)).entries) {
+    if (entry.status === "undone") await deleteJournal(entry.id);
+  }
 }
