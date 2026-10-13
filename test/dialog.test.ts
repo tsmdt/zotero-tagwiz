@@ -422,6 +422,143 @@ describe("dialog (in Zotero)", function () {
     assert.deepEqual([...dialog.selected], [match]);
   });
 
+  it("the filter's × shows only with text, and clears the filter", async function () {
+    const [a, b] = [name("xa"), name("xb")];
+    await makeItem([a, b]);
+    const { win, dialog } = await openDialog();
+    const doc = win.document;
+    const search = doc.querySelector<HTMLInputElement>('input[type="search"]')!;
+    const x =
+      search.parentElement!.querySelector<HTMLButtonElement>(".tw-clear")!;
+    assert.equal(win.getComputedStyle(x)!.display, "none");
+
+    search.value = a;
+    search.dispatchEvent(new win.Event("input"));
+    assert.notEqual(win.getComputedStyle(x)!.display, "none");
+    x.click();
+
+    assert.equal(search.value, "");
+    assert.equal(dialog.filter, "");
+    assert.equal(doc.activeElement, search);
+    assert.equal(win.getComputedStyle(x)!.display, "none");
+    // The list is redrawn after the filter's debounce.
+    await Zotero.Promise.delay(500);
+    const listed = [...doc.querySelectorAll(".tw-tag-table .tw-tag-name")].map(
+      (td) => td.textContent,
+    );
+    assert.includeMembers(listed, [a, b]);
+  });
+
+  it("clearing the new tag label empties the preview and keeps it empty", async function () {
+    const [a, b] = [name("ua"), name("ub")];
+    await makeItem([a, b]);
+    const { win, dialog } = await openDialog();
+    dialog.switchTab("unify");
+    dialog.selected = new Set([a]);
+    dialog.selectionChanged();
+    assert.equal(dialog.unifyTarget, a);
+
+    const target = win.document.getElementById("tw-target")!;
+    target
+      .parentElement!.querySelector<HTMLButtonElement>(".tw-clear")!
+      .click();
+
+    assert.equal(dialog.unifyTarget, "");
+    assert.isEmpty(dialog.plan.rows);
+    // Not refilled from the selection: the user emptied it.
+    dialog.selected.add(b);
+    dialog.selectionChanged();
+    assert.equal(dialog.unifyTarget, "");
+  });
+
+  it("clearing the prefix updates the Change Case preview", async function () {
+    const { win, dialog } = await openDialog();
+    const field = win.document.getElementById("tw-prefix") as HTMLInputElement;
+    field.value = "TECH: ";
+    field.dispatchEvent(new win.Event("input"));
+    assert.equal(dialog.caseOpts.prefix, "TECH: ");
+
+    field.parentElement!.querySelector<HTMLButtonElement>(".tw-clear")!.click();
+
+    assert.equal(field.value, "");
+    assert.equal(dialog.caseOpts.prefix, "");
+  });
+
+  it("the footer counts the unique tags of the scope and stays current", async function () {
+    const [both, other, added] = [name("tb"), name("to"), name("ta")];
+    const collection = new Zotero.Collection({
+      libraryID,
+      name: name("col"),
+    });
+    await collection.saveTx();
+    try {
+      // One name used as a manual and as an automatic tag counts once.
+      const item = await makeItem([both, other]);
+      item.setCollections([collection.id]);
+      await item.saveTx();
+      await makeItem([{ tag: both, type: 1 }]);
+      const { win, dialog } = await openDialog();
+      const total = () =>
+        plain(win.document.querySelector(".tw-tag-total")!.textContent!);
+      assert.equal(
+        total(),
+        `${dialog.rows.length} unique tags in this library`,
+      );
+
+      await dialog.setScope({
+        libraryID,
+        collection: { id: collection.id, name: collection.name },
+      });
+      assert.equal(total(), "2 unique tags in this collection");
+
+      const more = await makeItem([added]);
+      more.setCollections([collection.id]);
+      await more.saveTx();
+      await dialog.reload();
+      assert.equal(total(), "3 unique tags in this collection");
+
+      // Side by side, the count first, then a line and the latest message.
+      const parts = () =>
+        [...win.document.querySelector(".tw-footer-info")!.children].map(
+          (el) => el.className,
+        );
+      assert.deepEqual(parts(), ["tw-tag-total", "tw-status"]);
+      dialog.setStatus("Something happened.");
+      assert.deepEqual(parts(), ["tw-tag-total", "tw-separator", "tw-status"]);
+    } finally {
+      await collection.eraseTx();
+    }
+  });
+
+  it("the footer shows only the latest message next to the tag count", async function () {
+    const tag = name("lm");
+    await makeItem([tag]);
+    const { win, dialog } = await openDialog();
+    const shown = () =>
+      plain(
+        win.document.querySelector(".tw-footer-info .tw-status")!.textContent!,
+      );
+    dialog.setStatus("Done before.");
+    assert.equal(shown(), "Done before.");
+
+    // A new impact replaces the status...
+    dialog.switchTab("remove");
+    dialog.selected = new Set([tag]);
+    dialog.refreshPlan();
+    await dialog.updateImpact();
+    assert.equal(shown(), "Affects 1 items in the library.");
+    // ...the same impact again (a reload) does not replace a newer status...
+    dialog.setStatus("Something happened.");
+    await dialog.updateImpact();
+    assert.equal(shown(), "Something happened.");
+    // ...and without an impact the status shows.
+    dialog.selected.clear();
+    dialog.refreshPlan();
+    await dialog.updateImpact();
+    assert.equal(shown(), "Something happened.");
+    assert.lengthOf(win.document.querySelectorAll(".tw-footer-info > *"), 3);
+  });
+
   it("the Remove confirmation says it removes and names the tags", async function () {
     const tag = name("rc");
     await makeItem([tag]);

@@ -32,7 +32,7 @@ Open TagWiz from the **Tools** menu, or right-click a collection and choose **Ta
 > [!important]
 > **Every change applies to the whole library**, including items outside the currently selected collection (as well as items in the trash). The preview says how many items are affected (items that only carry a merge target are not counted: they don't change) and how many of them are outside the collection.
 
-Pick a tab, select tags (click a row to tick it, Shift + Click to tick every row up to the one clicked last; the filter box helps with long lists), check the preview, untick anything you do not want, and press **Apply**.
+Pick a tab, select tags (the filter box helps with long lists), check the preview, untick anything you do not want, and press **Apply**. The bottom of the window shows how many unique tags the library or collection has; a tag used both manually and automatically counts once. To empty a text field at once, click the **×** at its right end.
 
 ### Change Case
 
