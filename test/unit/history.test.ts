@@ -1,7 +1,6 @@
 import { assert } from "chai";
 import {
   affectedItemCount,
-  editKindOf,
   formatDate,
   formatTime,
   historyAction,
@@ -201,52 +200,6 @@ describe("history", function () {
           }
         }
       }
-    });
-  });
-
-  describe("editKindOf", function () {
-    it("uses the recorded kind", function () {
-      assert.equal(
-        editKindOf({
-          kind: "case",
-          tasks: [{ kind: "rename", from: "a", to: "A" }],
-        }),
-        "case",
-      );
-    });
-
-    it("classifies older journals by their tasks", function () {
-      assert.equal(
-        editKindOf({ tasks: [{ kind: "remove", name: "a", types: "all" }] }),
-        "remove",
-      );
-      assert.equal(
-        editKindOf({
-          tasks: [
-            { kind: "rename", from: "a", to: "A" },
-            { kind: "retype", name: "A", toType: 0 },
-          ],
-        }),
-        "duplicates",
-      );
-      assert.equal(
-        editKindOf({
-          tasks: [
-            { kind: "rename", from: "a", to: "c" },
-            { kind: "rename", from: "b", to: "c" },
-          ],
-        }),
-        "merge",
-      );
-      assert.equal(
-        editKindOf({
-          tasks: [
-            { kind: "rename", from: "a", to: "A" },
-            { kind: "rename", from: "b", to: "B" },
-          ],
-        }),
-        "rename",
-      );
     });
   });
 

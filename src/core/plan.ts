@@ -1,5 +1,6 @@
 import { convertCase } from "./caseStyles";
-import type { DuplicateGroup } from "./duplicates";
+import { getOrCreate } from "./collections";
+import { type DuplicateGroup, preferManual } from "./duplicates";
 import { cleanName } from "./normalize";
 import {
   CaseOptions,
@@ -26,14 +27,9 @@ function targetOf(op: Op): string | null {
   return op.kind === "rename" ? op.to : null;
 }
 
-function sourceNameOf(op: Op): string {
-  switch (op.kind) {
-    case "rename":
-      return op.from.name;
-    case "retype":
-    case "remove":
-      return op.tag.name;
-  }
+/** The tag an op acts on: a rename's source, or the retyped/removed tag. */
+export function opSource(op: Op): TagRef {
+  return op.kind === "rename" ? op.from : op.tag;
 }
 
 /**
@@ -45,7 +41,7 @@ function finalize(rows: PlanRow[], allTags: readonly TagRef[]): ChangePlan {
   const movedAway = new Set(
     rows
       .filter((r) => r.op.kind === "rename" || r.op.kind === "remove")
-      .map((r) => sourceNameOf(r.op)),
+      .map((r) => opSource(r.op).name),
   );
   // Distinct source names per target: the manual and automatic rows of one
   // name renamed together are a single source, not a merge.
@@ -53,9 +49,7 @@ function finalize(rows: PlanRow[], allTags: readonly TagRef[]): ChangePlan {
   for (const r of rows) {
     const to = targetOf(r.op);
     if (to === null) continue;
-    const sources = sourcesByTarget.get(to) ?? new Set<string>();
-    sources.add(sourceNameOf(r.op));
-    sourcesByTarget.set(to, sources);
+    getOrCreate(sourcesByTarget, to, () => new Set()).add(opSource(r.op).name);
   }
 
   for (const r of rows) {
@@ -64,7 +58,7 @@ function finalize(rows: PlanRow[], allTags: readonly TagRef[]): ChangePlan {
     const problem = validateTagName(to);
     if (problem) {
       r.error = problem;
-    } else if (movedAway.has(to) && sourceNameOf(r.op) !== to) {
+    } else if (movedAway.has(to) && opSource(r.op).name !== to) {
       // A -> B while B itself is renamed/removed: result would depend on order.
       r.error = "target-is-also-changed";
     } else if (existing.has(to) || (sourcesByTarget.get(to)?.size ?? 0) > 1) {
@@ -135,12 +129,7 @@ export function buildDuplicatePlan(
   const rows: PlanRow[] = [];
   for (const group of groups) {
     const picked = chosen.get(group) ?? group.canonical;
-    const canonical =
-      group.members.find((m) => m.name === picked.name && m.type === 0) ??
-      group.members.find(
-        (m) => m.name === picked.name && m.type === picked.type,
-      ) ??
-      picked;
+    const canonical = preferManual(group.members, picked.name) ?? picked;
     for (const member of group.members) {
       if (member === canonical) continue;
       if (member.name === canonical.name) {
@@ -151,9 +140,7 @@ export function buildDuplicatePlan(
         }
         continue;
       }
-      const r = row({ kind: "rename", from: member, to: canonical.name });
-      r.merges = true;
-      rows.push(r);
+      rows.push(row({ kind: "rename", from: member, to: canonical.name }));
     }
   }
   const plan = finalize(rows, allTags);

@@ -1,4 +1,5 @@
 import { DEFAULT_SMALL_WORDS } from "../core/caseStyles";
+import { compareCodeUnits, getOrCreate } from "../core/collections";
 import {
   DuplicateGroup,
   findDuplicateGroups,
@@ -20,6 +21,7 @@ import {
   buildRemovePlan,
   buildUnifyPlan,
   includedOps,
+  opSource,
 } from "../core/plan";
 import { TaskError, toTasks } from "../core/tasks";
 import type {
@@ -33,7 +35,11 @@ import type {
 import { applyOps, redoTo, undoTo } from "../zotero/engine";
 import { preflight } from "../zotero/guard";
 import { type HistoryEntry, listHistory } from "../zotero/journal";
-import { loadTags, measureImpact, type Scope } from "../zotero/tagStore";
+import {
+  loadTagsWithScope,
+  measureImpact,
+  type Scope,
+} from "../zotero/tagStore";
 import { FluentMessageId } from "../../typings/i10n";
 import { getString } from "../utils/locale";
 import { isWindowAlive } from "../utils/window";
@@ -156,23 +162,20 @@ const refKey = (t: TagRef) => `${t.name}\u0000${t.type}`;
 const groupKey = (g: DuplicateGroup) =>
   g.members.map(refKey).sort().join("\u0001");
 const byName = (a: string, b: string) =>
-  a.localeCompare(b, undefined, { sensitivity: "base" }) || (a < b ? -1 : 1);
-
-function opName(op: Op): string {
-  return op.kind === "rename" ? op.from.name : op.tag.name;
-}
+  a.localeCompare(b, undefined, { sensitivity: "base" }) ||
+  compareCodeUnits(a, b);
 
 /**
  * Names whose items an edit changes. A rename's target is not one of them:
  * items that already carry only the target keep it unchanged.
  */
 function editedNames(ops: readonly Op[]): string[] {
-  return [...new Set(ops.map(opName))];
+  return [...new Set(ops.map((op) => opSource(op).name))];
 }
 
 function opKey(op: Op): string {
-  const type = op.kind === "rename" ? op.from.type : op.tag.type;
-  return `${op.kind}\u0000${opName(op)}\u0000${op.kind === "rename" ? op.to : ""}\u0000${op.kind === "retype" ? type : ""}`;
+  const source = opSource(op);
+  return `${op.kind}\u0000${source.name}\u0000${op.kind === "rename" ? op.to : ""}\u0000${op.kind === "retype" ? source.type : ""}`;
 }
 
 export class TagWizDialog {
@@ -386,18 +389,8 @@ export class TagWizDialog {
   /** Re-read tags from the database and redraw everything. */
   private async reload() {
     if (!this.alive || this.busy) return;
-    try {
-      // Superseded by a newer load (e.g. setScope meanwhile): that one draws.
-      if (!(await this.loadData())) return;
-    } catch (e) {
-      Zotero.logError(e as Error);
-      this.setStatus(
-        getString("error-load", { args: { error: errorText(e) } }),
-        "error",
-      );
-      return;
-    }
-    if (!this.alive) return;
+    // Superseded by a newer load (e.g. setScope meanwhile): that one draws.
+    if (!(await this.loadOrReport()) || !this.alive) return;
     // Redrawing replaces the inputs: keep the caret where the user types.
     const active = this.doc.activeElement as HTMLInputElement | null;
     const focusID = active?.id;
@@ -428,6 +421,20 @@ export class TagWizDialog {
     }
   }
 
+  /** loadData, showing a failure in the status line (then false). */
+  private async loadOrReport(): Promise<boolean> {
+    try {
+      return await this.loadData();
+    } catch (e) {
+      Zotero.logError(e as Error);
+      this.setStatus(
+        getString("error-load", { args: { error: errorText(e) } }),
+        "error",
+      );
+      return false;
+    }
+  }
+
   /**
    * Read tags (and undo state) for the current library and scope. Returns
    * false, changing nothing, if another loadData started meanwhile: loads can
@@ -437,25 +444,14 @@ export class TagWizDialog {
   private async loadData(): Promise<boolean> {
     const seq = ++this.loadSeq;
     const { libraryID, scope } = this;
-    const allTags = await loadTags(libraryID);
-    const scoped = scope ? await loadTags(libraryID, scope) : [];
+    const { all: allTags, listed } = await loadTagsWithScope(libraryID, scope);
     const history =
       this.tab === "history" ? await listHistory(libraryID) : undefined;
     if (seq !== this.loadSeq) return false;
-    const listed = scope ? scoped : allTags;
 
     const refsByName = new Map<string, TagRef[]>();
     for (const tag of allTags) {
-      const list = refsByName.get(tag.name) ?? [];
-      list.push(tag);
-      refsByName.set(tag.name, list);
-    }
-    const scopeByName = new Map<string, number>();
-    for (const tag of scoped) {
-      scopeByName.set(
-        tag.name,
-        (scopeByName.get(tag.name) ?? 0) + (tag.scopeCount ?? 0),
-      );
+      getOrCreate(refsByName, tag.name, () => []).push(tag);
     }
     const names = [...new Set(listed.map((t) => t.name))].sort(byName);
     this.allTags = allTags;
@@ -465,7 +461,9 @@ export class TagWizDialog {
         name,
         refs,
         items: refs.reduce((n, r) => n + r.itemCount, 0),
-        scopeItems: scope ? scopeByName.get(name) : undefined,
+        scopeItems: scope
+          ? refs.reduce((n, r) => n + (r.scopeCount ?? 0), 0)
+          : undefined,
         type: tagKind(refs),
         color: refs.find((r) => r.color)?.color,
       };
@@ -550,8 +548,7 @@ export class TagWizDialog {
     const grouped = new Map<string, DisplayRow>();
     for (const row of this.plan.rows) {
       const key = opKey(row.op);
-      const items =
-        row.op.kind === "rename" ? row.op.from.itemCount : row.op.tag.itemCount;
+      const items = opSource(row.op).itemCount;
       const existing = grouped.get(key);
       if (existing) {
         existing.rows.push(row);
@@ -736,16 +733,7 @@ export class TagWizDialog {
   /** History is read when shown: runs, undos and pruning change it. */
   private async showHistory() {
     this.renderTabs();
-    try {
-      if (!(await this.loadData())) return;
-    } catch (e) {
-      Zotero.logError(e as Error);
-      this.setStatus(
-        getString("error-load", { args: { error: errorText(e) } }),
-        "error",
-      );
-      return;
-    }
+    if (!(await this.loadOrReport())) return;
     if (this.alive && this.tab === "history") this.renderAll();
   }
 
@@ -856,30 +844,25 @@ export class TagWizDialog {
         class: "tw-sort-icon",
         "aria-hidden": "true",
       });
-      const th = h(
+      const button = h(
         doc,
-        "th",
-        { class: cls },
-        h(
-          doc,
-          "button",
-          {
-            type: "button",
-            class: "tw-sort-button",
-            "data-sort": key,
-            // Library and collection names can be long and get truncated.
-            title: label,
-            onclick: () => {
-              this.sort = nextSort(this.sort, key);
-              for (const update of headerUpdates) update();
-              this.fillRows(tbody, updateCount, more);
-            },
+        "button",
+        {
+          type: "button",
+          class: "tw-sort-button",
+          "data-sort": key,
+          // Library and collection names can be long and get truncated.
+          title: label,
+          onclick: () => {
+            this.sort = nextSort(this.sort, key);
+            for (const update of headerUpdates) update();
+            this.fillRows(tbody, updateCount, more);
           },
-          h(doc, "span", { class: "tw-sort-label" }, label),
-          icon,
-        ),
+        },
+        h(doc, "span", { class: "tw-sort-label" }, label),
+        icon,
       );
-      th.appendChild(this.columnResizer("tags", th));
+      const th = this.resizableTh("tags", button, cls);
       const update = () => {
         const dir = this.sort.key === key ? this.sort.dir : undefined;
         th.setAttribute(
@@ -1112,13 +1095,13 @@ export class TagWizDialog {
 
   /** Selection changed: refresh dependent controls and the preview. */
   private selectionChanged() {
-    if (this.tab === "unify" && !this.targetTouched) {
-      const best = this.rows
-        .filter((r) => this.selected.has(r.name))
-        .sort((a, b) => b.items - a.items)[0];
-      this.unifyTarget = best?.name ?? "";
-      this.renderControls();
-    } else if (this.tab === "unify") {
+    if (this.tab === "unify") {
+      if (!this.targetTouched) {
+        const best = this.rows
+          .filter((r) => this.selected.has(r.name))
+          .sort((a, b) => b.items - a.items)[0];
+        this.unifyTarget = best?.name ?? "";
+      }
       this.renderControls();
     }
     this.refreshPlan();
@@ -1128,26 +1111,6 @@ export class TagWizDialog {
     const { doc } = this;
     clear(this.controlsEl);
     if (this.tab === "case") {
-      const style = h(doc, "select", {
-        id: "tw-style",
-        onchange: (e: Event) => {
-          this.caseOpts = {
-            ...this.caseOpts,
-            style: (e.target as HTMLSelectElement).value as CaseStyle,
-          };
-          this.refreshPlan();
-        },
-      });
-      for (const [value, label] of CASE_STYLES) {
-        style.appendChild(
-          h(
-            doc,
-            "option",
-            { value, selected: value === this.caseOpts.style },
-            getString(label),
-          ),
-        );
-      }
       const check = (id: string, label: FluentMessageId, key: "keepAcronyms") =>
         h(
           doc,
@@ -1173,12 +1136,15 @@ export class TagWizDialog {
           ),
         );
       append(this.controlsEl, [
-        h(
-          doc,
-          "div",
-          { class: "tw-field" },
-          h(doc, "label", { for: "tw-style" }, getString("case-style")),
-          style,
+        this.selectField(
+          "tw-style",
+          "case-style",
+          CASE_STYLES,
+          this.caseOpts.style,
+          (style) => {
+            this.caseOpts = { ...this.caseOpts, style };
+            this.refreshPlan();
+          },
         ),
         h(doc, "div", { class: "tw-separator" }),
         check("tw-acr", "case-keep-acronyms", "keepAcronyms"),
@@ -1236,63 +1202,100 @@ export class TagWizDialog {
           ),
           list,
         ),
-        h(
-          doc,
-          "div",
-          { class: "tw-hint", title: getString("unify-hint") },
-          getString("unify-hint"),
-        ),
+        this.hint("unify-hint"),
       ]);
-    } else if (this.tab === "remove") {
+    } else if (this.tab === "remove" || this.tab === "history") {
       append(this.controlsEl, [
-        h(
-          doc,
-          "div",
-          { class: "tw-hint", title: getString("remove-hint") },
-          getString("remove-hint"),
-        ),
-      ]);
-    } else if (this.tab === "history") {
-      append(this.controlsEl, [
-        h(
-          doc,
-          "div",
-          { class: "tw-hint", title: getString("history-hint") },
-          getString("history-hint"),
-        ),
+        this.hint(this.tab === "remove" ? "remove-hint" : "history-hint"),
       ]);
     } else if (this.tab === "duplicates") {
-      const tier = h(doc, "select", {
-        id: "tw-tier",
-        onchange: (e: Event) => {
-          this.dupTier = (e.target as HTMLSelectElement).value as DuplicateTier;
-          this.groupOff.clear();
-          this.chosen.clear();
-          this.recomputeGroups();
-          this.renderLeft();
-          this.refreshPlan();
-        },
-      });
-      for (const [value, label] of DUP_TIERS) {
-        tier.appendChild(
-          h(
-            doc,
-            "option",
-            { value, selected: value === this.dupTier },
-            getString(label),
-          ),
-        );
-      }
       append(this.controlsEl, [
-        h(
-          doc,
-          "div",
-          { class: "tw-field" },
-          h(doc, "label", { for: "tw-tier" }, getString("dup-level")),
-          tier,
+        this.selectField(
+          "tw-tier",
+          "dup-level",
+          DUP_TIERS,
+          this.dupTier,
+          (tier) => {
+            this.dupTier = tier;
+            this.groupOff.clear();
+            this.chosen.clear();
+            this.recomputeGroups();
+            this.renderLeft();
+            this.refreshPlan();
+          },
         ),
       ]);
     }
+  }
+
+  /** A labelled <select> of `options` ([value, label]). */
+  private selectField<T extends string>(
+    id: string,
+    label: FluentMessageId,
+    options: ReadonlyArray<[T, FluentMessageId]>,
+    value: T,
+    onChange: (value: T) => void,
+  ): HTMLElement {
+    const { doc } = this;
+    const select = h(doc, "select", {
+      id,
+      onchange: () => onChange(select.value as T),
+    });
+    for (const [optionValue, optionLabel] of options) {
+      select.appendChild(
+        h(
+          doc,
+          "option",
+          { value: optionValue, selected: optionValue === value },
+          getString(optionLabel),
+        ),
+      );
+    }
+    return h(
+      doc,
+      "div",
+      { class: "tw-field" },
+      h(doc, "label", { for: id }, getString(label)),
+      select,
+    );
+  }
+
+  /** A one-line hint; the full text shows on hover where it is cut off. */
+  private hint(id: FluentMessageId): HTMLElement {
+    const text = getString(id);
+    return h(this.doc, "div", { class: "tw-hint", title: text }, text);
+  }
+
+  /** A note below a list, e.g. that it shows only some of its rows. */
+  private notice(id: FluentMessageId, args: L10nArgs): HTMLElement {
+    return h(
+      this.doc,
+      "div",
+      { class: "tw-hint tw-list-notice" },
+      getString(id, { args }),
+    );
+  }
+
+  /** The header of a pane that only shows a title. */
+  private paneTitle(id: FluentMessageId): HTMLElement {
+    const { doc } = this;
+    return h(
+      doc,
+      "div",
+      { class: "tw-pane-header" },
+      h(doc, "span", { class: "tw-pane-title" }, getString(id)),
+    );
+  }
+
+  /** A header cell whose column the user can resize. */
+  private resizableTh(
+    table: ResizableTable,
+    content: Node | string,
+    cls = "",
+  ): HTMLElement {
+    const th = h(this.doc, "th", { class: cls }, content);
+    th.appendChild(this.columnResizer(table, th));
+    return th;
   }
 
   private renderDuplicates() {
@@ -1325,11 +1328,11 @@ export class TagWizDialog {
       );
       // The survivor is a name: its manual and automatic uses stay together
       // (buildDuplicatePlan keeps the manual one), so one choice per name.
-      const byName = new Map<string, TagRef[]>();
+      const refsByName = new Map<string, TagRef[]>();
       for (const member of group.members) {
-        byName.set(member.name, [...(byName.get(member.name) ?? []), member]);
+        getOrCreate(refsByName, member.name, () => []).push(member);
       }
-      for (const [name, refs] of byName) {
+      for (const [name, refs] of refsByName) {
         const items = refs.reduce((n, r) => n + r.itemCount, 0);
         box.appendChild(
           h(
@@ -1363,14 +1366,10 @@ export class TagWizDialog {
     }
     if (this.groups.length > MAX_ROWS) {
       scroll.appendChild(
-        h(
-          doc,
-          "div",
-          { class: "tw-hint tw-list-notice" },
-          getString("dup-groups-more", {
-            args: { shown: MAX_ROWS, total: this.groups.length },
-          }),
-        ),
+        this.notice("dup-groups-more", {
+          shown: MAX_ROWS,
+          total: this.groups.length,
+        }),
       );
     }
 
@@ -1425,32 +1424,15 @@ export class TagWizDialog {
       scroll.appendChild(table);
       if (pairs.length > MAX_FUZZY) {
         scroll.appendChild(
-          h(
-            doc,
-            "div",
-            { class: "tw-hint tw-list-notice" },
-            getString("dup-fuzzy-more", {
-              args: { shown: MAX_FUZZY, total: pairs.length },
-            }),
-          ),
+          this.notice("dup-fuzzy-more", {
+            shown: MAX_FUZZY,
+            total: pairs.length,
+          }),
         );
       }
     }
 
-    append(this.leftEl, [
-      h(
-        doc,
-        "div",
-        { class: "tw-pane-header" },
-        h(
-          doc,
-          "span",
-          { class: "tw-pane-title" },
-          getString("dup-groups-title"),
-        ),
-      ),
-      scroll,
-    ]);
+    append(this.leftEl, [this.paneTitle("dup-groups-title"), scroll]);
   }
 
   private sendToUnify(a: TagRef, b: TagRef) {
@@ -1471,11 +1453,8 @@ export class TagWizDialog {
         h(doc, "div", { class: "tw-list-notice" }, getString("history-empty")),
       );
     } else {
-      const header = (label: string, cls = "") => {
-        const th = h(doc, "th", { class: cls }, label);
-        th.appendChild(this.columnResizer("history", th));
-        return th;
-      };
+      const header = (label: string, cls?: string) =>
+        this.resizableTh("history", label, cls);
       const tbody = h(doc, "tbody");
       for (const entry of this.history) {
         const undone = entry.status === "undone";
@@ -1549,25 +1528,12 @@ export class TagWizDialog {
     }
     if (this.historyUnreadable.length) {
       scroll.appendChild(
-        h(
-          doc,
-          "div",
-          { class: "tw-hint tw-list-notice" },
-          getString("history-unreadable", {
-            args: { count: this.historyUnreadable.length },
-          }),
-        ),
+        this.notice("history-unreadable", {
+          count: this.historyUnreadable.length,
+        }),
       );
     }
-    append(this.leftEl, [
-      h(
-        doc,
-        "div",
-        { class: "tw-pane-header" },
-        h(doc, "span", { class: "tw-pane-title" }, getString("history-title")),
-      ),
-      scroll,
-    ]);
+    append(this.leftEl, [this.paneTitle("history-title"), scroll]);
     // Once in the document: it reads the headers' computed padding.
     const table = scroll.querySelector("table");
     if (table) this.applyColumnWidths("history", table);
@@ -1634,7 +1600,7 @@ export class TagWizDialog {
         type: "checkbox",
         checked: row.included && !row.blocked,
         disabled: row.blocked,
-        "aria-label": opName(row.op),
+        "aria-label": opSource(row.op).name,
         onchange: () => {
           if (box.checked) this.excluded.delete(row.key);
           else this.excluded.add(row.key);
@@ -1653,11 +1619,8 @@ export class TagWizDialog {
         ),
       );
     }
-    const header = (label: string, cls = "") => {
-      const th = h(doc, "th", { class: cls }, label);
-      th.appendChild(this.columnResizer("preview", th));
-      return th;
-    };
+    const header = (label: string, cls?: string) =>
+      this.resizableTh("preview", label, cls);
     const table = h(
       doc,
       "table",
@@ -1686,14 +1649,10 @@ export class TagWizDialog {
         { class: "tw-scroll-box" },
         table,
         rows.length > MAX_ROWS
-          ? h(
-              doc,
-              "div",
-              { class: "tw-hint tw-list-notice" },
-              getString("preview-more", {
-                args: { shown: MAX_ROWS, total: rows.length },
-              }),
-            )
+          ? this.notice("preview-more", {
+              shown: MAX_ROWS,
+              total: rows.length,
+            })
           : null,
       ),
     ]);
@@ -1860,6 +1819,13 @@ export class TagWizDialog {
 
   // ---------------------------------------------------------- actions
 
+  private reportError(e: unknown) {
+    this.setStatus(
+      getString("status-error", { args: { error: errorText(e) } }),
+      "error",
+    );
+  }
+
   private guardMessage(reason: string): string {
     const ids: Record<string, FluentMessageId> = {
       "read-only": "error-read-only",
@@ -1978,10 +1944,7 @@ export class TagWizDialog {
       else
         this.setStatus(getString("status-failed", { args }) + skipped, "error");
     } catch (e) {
-      this.setStatus(
-        getString("status-error", { args: { error: errorText(e) } }),
-        "error",
-      );
+      this.reportError(e);
     } finally {
       this.setBusy(false);
       if (started) {
@@ -2125,10 +2088,7 @@ export class TagWizDialog {
         );
       else this.setStatus(getString("history-not-found"), "error");
     } catch (e) {
-      this.setStatus(
-        getString("status-error", { args: { error: errorText(e) } }),
-        "error",
-      );
+      this.reportError(e);
     } finally {
       this.setBusy(false);
       if (started) this.historySelected = undefined;

@@ -1,5 +1,6 @@
 /* eslint-disable mocha/no-setup-in-describe, mocha/consistent-spacing-between-blocks -- itx() is a thin wrapper around it() that makes errors readable */
 import { assert } from "chai";
+import type { EditKind } from "../src/core/history";
 import type { Op, TagRef, TagType } from "../src/core/types";
 import {
   applyOps,
@@ -131,8 +132,13 @@ describe("engine (in Zotero)", function () {
     return found!;
   }
 
-  async function run(ops: Op[]) {
-    return applyOps({ libraryID, ops, allTags: await loadTags(libraryID) });
+  async function run(ops: Op[], kind: EditKind = "rename") {
+    return applyOps({
+      libraryID,
+      ops,
+      allTags: await loadTags(libraryID),
+      kind,
+    });
   }
 
   const rename = async (from: string, to: string, type: TagType = 0) =>
@@ -199,6 +205,7 @@ describe("engine (in Zotero)", function () {
         createdAt: new Date().toISOString(),
         libraryID,
         status: "done",
+        kind: "rename",
         tasks: [],
         completedTasks: 0,
         before: [],
@@ -208,38 +215,6 @@ describe("engine (in Zotero)", function () {
       // Not left in the History of the test profile's library.
       await deleteJournal(id);
     });
-
-    itx(
-      "7. snapshots from the old tagcleaner folder are migrated",
-      async function () {
-        const legacyDir = PathUtils.join(
-          Zotero.DataDirectory.dir,
-          "tagcleaner",
-        );
-        await IOUtils.makeDirectory(legacyDir, { ignoreExisting: true });
-        const id = `${newJournalID()}-legacy`;
-        const legacyFile = PathUtils.join(legacyDir, `${id}.json`);
-        await IOUtils.writeJSON(legacyFile, {
-          version: 1,
-          id,
-          createdAt: "",
-          libraryID,
-          status: "done",
-          tasks: [],
-          completedTasks: 0,
-          before: [],
-        });
-
-        assert.include(await listJournalIDs(), id);
-        assert.isFalse(await IOUtils.exists(legacyFile));
-        assert.equal((await readJournal(id)).id, id);
-
-        await IOUtils.remove(
-          PathUtils.join(Zotero.DataDirectory.dir, "tagwiz", `${id}.json`),
-          { ignoreAbsent: true },
-        );
-      },
-    );
   });
 
   itx("preflight accepts the user library", function () {
@@ -327,6 +302,7 @@ describe("engine (in Zotero)", function () {
         libraryID,
         allTags,
         ops: [{ kind: "rename", from, to: name("gt") }],
+        kind: "rename",
       });
 
       assert.equal(result.status, "done");
@@ -634,6 +610,7 @@ describe("engine (in Zotero)", function () {
             { kind: "rename", from: await ref(a), to: b },
             { kind: "rename", from: await ref(c), to: d },
           ],
+          kind: "rename",
           onProgress: () => {
             calls++;
             throw new TypeError("can't access dead object");
@@ -732,6 +709,7 @@ describe("engine (in Zotero)", function () {
       createdAt: new Date().toISOString(),
       libraryID: library,
       status: "done" as const,
+      kind: "rename" as const,
       tasks: [],
       completedTasks: 0,
       before: [],
@@ -753,6 +731,20 @@ describe("engine (in Zotero)", function () {
             error = e;
           }
           assert.exists(error);
+          assert.include((await listHistory(libraryID)).unreadable, id);
+        } finally {
+          await IOUtils.remove(journalPath(id), { ignoreAbsent: true });
+        }
+      },
+    );
+
+    itx(
+      "treats a journal without a recorded kind as unreadable",
+      async function () {
+        const id = `${newJournalID()}-nokind`;
+        const { kind: _kind, ...old } = fakeJournal(id, libraryID);
+        await IOUtils.writeJSON(journalPath(id), old);
+        try {
           assert.include((await listHistory(libraryID)).unreadable, id);
         } finally {
           await IOUtils.remove(journalPath(id), { ignoreAbsent: true });
@@ -830,7 +822,12 @@ describe("engine (in Zotero)", function () {
         return (original as any).apply(IOUtils, args);
       };
       try {
-        const result = await applyOps({ libraryID, allTags, ops });
+        const result = await applyOps({
+          libraryID,
+          allTags,
+          ops,
+          kind: "rename",
+        });
         assert.equal(result.completedTasks, 6);
       } finally {
         (IOUtils as any).writeJSON = original;
@@ -856,6 +853,7 @@ describe("engine (in Zotero)", function () {
           libraryID,
           allTags,
           ops: [{ kind: "rename", from, to: name("nh") }],
+          kind: "rename",
         });
 
         assert.equal(second.skippedTasks, 1);
@@ -869,35 +867,20 @@ describe("engine (in Zotero)", function () {
       "ignores files in the journal folder that are not journals",
       async function () {
         const dir = PathUtils.join(Zotero.DataDirectory.dir, "tagwiz");
-        const legacyDir = PathUtils.join(
-          Zotero.DataDirectory.dir,
-          "tagcleaner",
-        );
         const foreign = PathUtils.join(dir, "notes.json");
-        const legacyForeign = PathUtils.join(legacyDir, "settings.json");
         await IOUtils.makeDirectory(dir, { ignoreExisting: true });
-        await IOUtils.makeDirectory(legacyDir, { ignoreExisting: true });
         await IOUtils.writeJSON(foreign, { not: "a journal" });
-        await IOUtils.writeJSON(legacyForeign, { not: "a journal" });
         const x = name("fx");
         await makeItem([x]);
         let result: Awaited<ReturnType<typeof rename>> | undefined;
         try {
           assert.notInclude(await listJournalIDs(), "notes");
-          // The legacy folder's other files are not moved.
-          assert.isTrue(await IOUtils.exists(legacyForeign));
           result = await rename(x, name("fy"));
           assert.match(result.journalId, /^\d{4}-\d{2}-\d{2}T/);
           assert.equal((await listJournalIDs())[0], result.journalId);
           assert.deepEqual((await listHistory(libraryID)).unreadable, []);
         } finally {
           await IOUtils.remove(foreign, { ignoreAbsent: true });
-          await IOUtils.remove(legacyForeign, { ignoreAbsent: true });
-          try {
-            await IOUtils.remove(legacyDir); // only if now empty
-          } catch {
-            // leave a folder that holds other files
-          }
         }
       },
     );
@@ -930,12 +913,12 @@ describe("engine (in Zotero)", function () {
           kind: "remove",
         });
         await makeItem([c]);
-        const legacy = await rename(c, name("hd")); // no kind recorded
+        const third = await rename(c, name("hd"));
 
         const { entries } = await listHistory(libraryID);
         const ids = entries.map((e) => e.id);
         assert.deepEqual(ids.slice(0, 3), [
-          legacy.journalId,
+          third.journalId,
           second.journalId,
           first.journalId,
         ]);
@@ -1157,6 +1140,7 @@ describe("engine (in Zotero)", function () {
           libraryID: -1,
           status: "undone",
           undoneStatus: "done",
+          kind: "rename",
           tasks: [],
           completedTasks: 0,
           before: [],
@@ -1347,6 +1331,7 @@ describe("engine (in Zotero)", function () {
           libraryID,
           allTags,
           ops: [{ kind: "rename", from, to: name("kh") }],
+          kind: "rename",
         });
         assert.equal(nothing.journalId, "");
         const ids = async () =>

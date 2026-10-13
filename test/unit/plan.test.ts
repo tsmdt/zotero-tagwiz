@@ -110,7 +110,7 @@ describe("plan", function () {
 
   describe("buildRemovePlan", function () {
     it("warns when a colored tag is removed", function () {
-      const all = [t("x", 1, { color: "#f00", position: 0 }), t("y")];
+      const all = [t("x", 1, { color: "#f00" }), t("y")];
       const plan = buildRemovePlan(all, all);
       assert.deepEqual(plan.rows[0].warnings, ["loses-color"]);
       assert.deepEqual(plan.rows[1].warnings, []);

@@ -1,4 +1,5 @@
-import { DuplicateTier, duplicateKey, tierRank } from "./normalize";
+import { compareCodeUnits, getOrCreate } from "./collections";
+import { DUPLICATE_TIERS, DuplicateTier, duplicateKey } from "./normalize";
 import type { TagRef } from "./types";
 
 export interface DuplicateGroup {
@@ -13,6 +14,20 @@ export interface FuzzyPair {
   a: TagRef;
   b: TagRef;
   reason: "typo" | "plural";
+}
+
+/**
+ * The manual tag named `name` among `members`, else the automatic one: a
+ * manual assertion wins over an automatic one of the same name.
+ */
+export function preferManual(
+  members: readonly TagRef[],
+  name: string,
+): TagRef | undefined {
+  return (
+    members.find((m) => m.name === name && m.type === 0) ??
+    members.find((m) => m.name === name)
+  );
 }
 
 /**
@@ -33,9 +48,9 @@ export function pickCanonical(members: readonly TagRef[]): TagRef {
       Number(!!y.color) - Number(!!x.color) ||
       x.type - y.type ||
       Number(hasUpper(y)) - Number(hasUpper(x)) ||
-      (x.name < y.name ? -1 : x.name > y.name ? 1 : 0),
+      compareCodeUnits(x.name, y.name),
   )[0];
-  return members.find((m) => m.name === best.name && m.type === 0) ?? best;
+  return preferManual(members, best.name) ?? best;
 }
 
 /**
@@ -48,47 +63,30 @@ export function findDuplicateGroups(
 ): DuplicateGroup[] {
   const buckets = new Map<string, TagRef[]>();
   for (const tag of tags) {
-    const key = duplicateKey(tag.name, maxTier);
-    const bucket = buckets.get(key);
-    if (bucket) bucket.push(tag);
-    else buckets.set(key, [tag]);
+    getOrCreate(buckets, duplicateKey(tag.name, maxTier), () => []).push(tag);
   }
 
   const groups: DuplicateGroup[] = [];
   for (const members of buckets.values()) {
     if (members.length < 2) continue;
+    // All members share the key of maxTier, so the search ends there at the
+    // latest.
     const matchedBy =
-      (["exact", "case", "normalized"] as const)
-        .slice(0, tierRank(maxTier) + 1)
-        .find((tier) => {
-          const first = duplicateKey(members[0].name, tier);
-          return members.every((m) => duplicateKey(m.name, tier) === first);
-        }) ?? maxTier;
+      DUPLICATE_TIERS.find((tier) => {
+        const first = duplicateKey(members[0].name, tier);
+        return members.every((m) => duplicateKey(m.name, tier) === first);
+      }) ?? maxTier;
     groups.push({ matchedBy, members, canonical: pickCanonical(members) });
   }
   return groups.sort(
     (a, b) =>
       sum(b.members) - sum(a.members) ||
-      (a.canonical.name < b.canonical.name ? -1 : 1),
+      compareCodeUnits(a.canonical.name, b.canonical.name),
   );
 }
 
 function sum(members: readonly TagRef[]): number {
   return members.reduce((n, m) => n + m.itemCount, 0);
-}
-
-/** Levenshtein distance <= 1 (cheap early-out; no full matrix). */
-export function withinOneEdit(a: string, b: string): boolean {
-  if (a === b) return true;
-  const la = a.length;
-  const lb = b.length;
-  if (Math.abs(la - lb) > 1) return false;
-  let i = 0;
-  while (i < la && i < lb && a[i] === b[i]) i++;
-  if (la === lb) return a.slice(i + 1) === b.slice(i + 1);
-  return la > lb
-    ? a.slice(i + 1) === b.slice(i)
-    : b.slice(i + 1) === a.slice(i);
 }
 
 /**
@@ -129,11 +127,8 @@ export function findFuzzyPairs(tags: readonly TagRef[]): FuzzyPair[] {
 
   const byKey = new Map<string, Item[]>();
   const bySubstitution = new Map<string, Item[]>();
-  const push = (map: Map<string, Item[]>, key: string, item: Item) => {
-    const list = map.get(key);
-    if (list) list.push(item);
-    else map.set(key, [item]);
-  };
+  const push = (map: Map<string, Item[]>, key: string, item: Item) =>
+    getOrCreate(map, key, () => []).push(item);
   const without = (chars: string[], i: number) =>
     chars.slice(0, i).join("") + chars.slice(i + 1).join("");
   for (const item of items) {
@@ -171,12 +166,9 @@ export function findFuzzyPairs(tags: readonly TagRef[]): FuzzyPair[] {
   return pairs.sort(
     (p, q) =>
       q.a.itemCount + q.b.itemCount - (p.a.itemCount + p.b.itemCount) ||
-      byPairName(p, q),
+      compareCodeUnits(
+        `${p.a.name}\u0000${p.b.name}`,
+        `${q.a.name}\u0000${q.b.name}`,
+      ),
   );
-}
-
-function byPairName(p: FuzzyPair, q: FuzzyPair): number {
-  const a = `${p.a.name}\u0000${p.b.name}`;
-  const b = `${q.a.name}\u0000${q.b.name}`;
-  return a < b ? -1 : a > b ? 1 : 0;
 }

@@ -1,12 +1,9 @@
-import { lower } from "./caseStyles";
+import { CAMEL_BOUNDARY, lower, SEPARATORS } from "./caseStyles";
 
-export type DuplicateTier = "exact" | "case" | "normalized";
+/** Duplicate tiers, each matching more than the one before. */
+export const DUPLICATE_TIERS = ["exact", "case", "normalized"] as const;
 
-const TIER_ORDER: DuplicateTier[] = ["exact", "case", "normalized"];
-
-export function tierRank(tier: DuplicateTier): number {
-  return TIER_ORDER.indexOf(tier);
-}
+export type DuplicateTier = (typeof DUPLICATE_TIERS)[number];
 
 /** A Latin or Greek letter followed by the combining marks (accents) to drop. */
 const ACCENTED = /([\p{Script=Latin}\p{Script=Greek}])\p{M}+/gu;
@@ -41,9 +38,10 @@ export function duplicateKey(name: string, tier: DuplicateTier): string {
     .normalize("NFKD")
     .replace(ACCENTED, "$1")
     .normalize("NFC")
-    .replace(/(\p{Ll}|\p{N})(\p{Lu})/gu, "$1 $2")
+    .replace(CAMEL_BOUNDARY, "$1 $2")
     .toLowerCase()
-    .replace(/[\s_-]+/gu, " ")
+    .split(SEPARATORS)
+    .join(" ")
     .trim();
   // Separator-only names ("-", "_") would all collapse to ""; keep them apart.
   return folded === "" ? lowered : folded;

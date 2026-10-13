@@ -6,11 +6,12 @@ export interface TagRef {
   type: TagType;
   /** Number of items in the library carrying this tag (trashed items included). */
   itemCount: number;
-  /** Items inside the selected collection scope (trashed excluded); unset without a scope. */
+  /**
+   * Items inside the selected collection scope (trashed excluded): 0 for a
+   * tag used only outside it, unset without a scope.
+   */
   scopeCount?: number;
   color?: string;
-  /** Position within the library's colored-tag list. */
-  position?: number;
 }
 
 export type CaseStyle =

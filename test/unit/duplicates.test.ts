@@ -3,7 +3,6 @@ import {
   findDuplicateGroups,
   findFuzzyPairs,
   pickCanonical,
-  withinOneEdit,
 } from "../../src/core/duplicates";
 import { duplicateKey } from "../../src/core/normalize";
 import type { TagRef } from "../../src/core/types";
@@ -166,13 +165,6 @@ describe("duplicates", function () {
   });
 
   describe("fuzzy suggestions", function () {
-    it("withinOneEdit", function () {
-      assert.isTrue(withinOneEdit("cat", "cats"));
-      assert.isTrue(withinOneEdit("cats", "cat"));
-      assert.isTrue(withinOneEdit("color", "colos"));
-      assert.isFalse(withinOneEdit("color", "colours"));
-    });
-
     it("finds typos and plurals, skips short names and real duplicates", function () {
       const pairs = findFuzzyPairs([
         t("algorithm"),

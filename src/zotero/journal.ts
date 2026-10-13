@@ -1,4 +1,4 @@
-import { affectedItemCount, EditKind, editKindOf } from "../core/history";
+import { affectedItemCount, type EditKind } from "../core/history";
 import type { Task } from "../core/tasks";
 import type { TagState } from "./tagStore";
 
@@ -11,8 +11,8 @@ export type JournalStatus =
 
 /**
  * Record of one apply run: what was asked, what the affected tags looked like
- * before and after. Written to disk before the first change and updated after
- * every task, so a crash still leaves a record that can be undone from
+ * before and after. Written to disk before the first change and again when
+ * the run ends, so a crash still leaves a record that can be undone from
  * `before` (`after` is then missing, see undoJournal; it cannot be redone).
  */
 export interface Journal {
@@ -21,10 +21,9 @@ export interface Journal {
   createdAt: string;
   libraryID: number;
   status: JournalStatus;
-  /** The status an undo replaced, put back by a redo. */
+  /** The status an undo replaced, put back by a redo. Set while undone. */
   undoneStatus?: JournalStatus;
-  /** Missing in journals written before it was recorded; see editKindOf. */
-  kind?: EditKind;
+  kind: EditKind;
   tasks: Task[];
   completedTasks: number;
   error?: string;
@@ -40,33 +39,9 @@ const KEEP_FILES = 50;
 const TMP_SUFFIX = ".tmp";
 
 const DIR_NAME = "tagwiz";
-/** Folder used before the plugin was renamed to TagWiz. */
-const LEGACY_DIR_NAME = "tagcleaner";
 
 function dirPath(): string {
   return PathUtils.join(Zotero.DataDirectory.dir, DIR_NAME);
-}
-
-/**
- * Move snapshots from the pre-rename folder into the current one, so undo
- * keeps working across the rename. Existing files are never overwritten.
- */
-async function migrateLegacyJournals(): Promise<void> {
-  const legacy = PathUtils.join(Zotero.DataDirectory.dir, LEGACY_DIR_NAME);
-  if (!(await IOUtils.exists(legacy))) return;
-  await IOUtils.makeDirectory(dirPath(), { ignoreExisting: true });
-  for (const path of (await IOUtils.getChildren(legacy)) as string[]) {
-    // Only snapshots: the folder name is generic enough that other files
-    // may be someone else's.
-    if (idOfFile(PathUtils.filename(path)) === undefined) continue;
-    const target = PathUtils.join(dirPath(), PathUtils.filename(path));
-    if (!(await IOUtils.exists(target))) await IOUtils.move(path, target);
-  }
-  try {
-    await IOUtils.remove(legacy); // only succeeds if the folder is now empty
-  } catch {
-    // something is left behind; leave the folder alone
-  }
 }
 
 function filePath(id: string): string {
@@ -153,9 +128,10 @@ function checkJournal(value: any): Journal {
     typeof value.createdAt === "string" &&
     Number.isInteger(value.libraryID) &&
     typeof value.status === "string" &&
-    (value.kind === undefined || typeof value.kind === "string") &&
-    (value.undoneStatus === undefined ||
-      typeof value.undoneStatus === "string") &&
+    typeof value.kind === "string" &&
+    (value.status === "undone"
+      ? typeof value.undoneStatus === "string"
+      : value.undoneStatus === undefined) &&
     Array.isArray(value.tasks) &&
     Number.isInteger(value.completedTasks) &&
     Array.isArray(value.before) &&
@@ -166,13 +142,8 @@ function checkJournal(value: any): Journal {
   return value as Journal;
 }
 
-async function readFile(id: string): Promise<Journal> {
-  return checkJournal(await IOUtils.readJSON(filePath(id)));
-}
-
 export async function readJournal(id: string): Promise<Journal> {
-  await migrateLegacyJournals();
-  return readFile(id);
+  return checkJournal(await IOUtils.readJSON(filePath(id)));
 }
 
 /** Library of each journal read so far: it never changes, and files are big. */
@@ -181,7 +152,7 @@ const libraryOf = new Map<string, number>();
 async function journalLibrary(id: string): Promise<number | undefined> {
   if (!libraryOf.has(id)) {
     try {
-      libraryOf.set(id, (await readFile(id)).libraryID);
+      libraryOf.set(id, (await readJournal(id)).libraryID);
     } catch {
       return undefined;
     }
@@ -191,7 +162,6 @@ async function journalLibrary(id: string): Promise<number | undefined> {
 
 /** Newest first. */
 export async function listJournalIDs(): Promise<string[]> {
-  await migrateLegacyJournals();
   if (!(await IOUtils.exists(dirPath()))) return [];
   const children: string[] = await IOUtils.getChildren(dirPath());
   return children
@@ -258,7 +228,7 @@ function summarize(journal: Journal): HistoryEntry {
   return {
     id: journal.id,
     createdAt: journal.createdAt,
-    kind: editKindOf(journal),
+    kind: journal.kind,
     items: affectedItemCount(journal.before, journal.after),
     status: journal.status,
     interrupted: !journal.after,
@@ -279,7 +249,7 @@ export async function listHistory(libraryID: number): Promise<History> {
         entries.push(hit.entry);
         continue;
       }
-      const journal = await readFile(id);
+      const journal = await readJournal(id);
       libraryOf.set(id, journal.libraryID);
       if (journal.libraryID !== libraryID) continue;
       const entry = summarize(journal);

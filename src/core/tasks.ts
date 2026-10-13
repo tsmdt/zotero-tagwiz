@@ -1,3 +1,4 @@
+import { getOrCreate } from "./collections";
 import { cleanName } from "./normalize";
 import type { Op, TagRef, TagType } from "./types";
 
@@ -24,7 +25,7 @@ export class TaskError extends Error {
   }
 }
 
-export function taskNames(task: Task): string[] {
+function taskNames(task: Task): string[] {
   return task.kind === "rename" ? [task.from, task.to] : [task.name];
 }
 
@@ -44,9 +45,7 @@ export function toTasks(
 ): Task[] {
   const typesByName = new Map<string, Set<TagType>>();
   for (const tag of allTags) {
-    const set = typesByName.get(tag.name) ?? new Set<TagType>();
-    set.add(tag.type);
-    typesByName.set(tag.name, set);
+    getOrCreate(typesByName, tag.name, () => new Set()).add(tag.type);
   }
 
   const renames = new Map<string, { to: string; types: Set<TagType> }>();
@@ -70,9 +69,7 @@ export function toTasks(
     } else if (op.kind === "retype") {
       retypes.push({ kind: "retype", name: op.tag.name, toType: op.toType });
     } else {
-      const set = removes.get(op.tag.name) ?? new Set<TagType>();
-      set.add(op.tag.type);
-      removes.set(op.tag.name, set);
+      getOrCreate(removes, op.tag.name, () => new Set()).add(op.tag.type);
     }
   }
 

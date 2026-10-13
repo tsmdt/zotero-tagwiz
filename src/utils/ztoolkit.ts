@@ -16,8 +16,6 @@ class TagWizToolkit extends BasicTool {
 
 function createZToolkit() {
   const _ztoolkit = new TagWizToolkit();
-  _ztoolkit.basicOptions.log.prefix = `[${config.addonName}]`;
-  _ztoolkit.basicOptions.log.disableConsole = __env__ === "production";
   _ztoolkit.basicOptions.api.pluginID = config.addonID;
   return _ztoolkit;
 }

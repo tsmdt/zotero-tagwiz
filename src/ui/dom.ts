@@ -83,7 +83,7 @@ export function clearable(
         input.focus();
       },
     },
-    "×",
+    "🅧",
   );
   return h(doc, "span", { class: "tw-clearable" }, input, button);
 }

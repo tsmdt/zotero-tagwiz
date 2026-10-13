@@ -1,7 +1,12 @@
-import { type EditKind, redoChain, undoChain } from "../core/history";
+import {
+  diffItems,
+  type EditKind,
+  redoChain,
+  undoChain,
+} from "../core/history";
 import { affectedNames, Task, toTasks } from "../core/tasks";
 import type { Op, TagRef, TagType } from "../core/types";
-import { preflight } from "./guard";
+import { assertEditable, guardError, preflight } from "./guard";
 import {
   deleteJournal,
   discardUndone,
@@ -14,7 +19,7 @@ import {
 } from "./journal";
 import {
   captureStates,
-  getColorOf,
+  colorsByName,
   itemsWithTag,
   tagIDsOf,
   TagState,
@@ -39,7 +44,7 @@ export interface ApplyOptions {
   /** Every tag of the library; used to validate that name-level tasks are complete. */
   allTags: readonly TagRef[];
   /** Which tab the run came from, for the History tab. */
-  kind?: EditKind;
+  kind: EditKind;
   onProgress?: (done: number, total: number, task: Task) => void;
   /** Polled between tasks only; a task is never interrupted half-way. */
   isCancelled?: () => boolean;
@@ -112,6 +117,24 @@ async function editItems(
   }
 }
 
+/**
+ * Remove tags by ID from every item of the library: of the given types, or
+ * entirely (with their colors) without `types`.
+ */
+async function removeTagIDs(
+  libraryID: number,
+  ids: number[],
+  types?: TagType[],
+) {
+  // Zotero takes undefined for every type; its typings require an array.
+  await Zotero.Tags.removeFromLibrary(
+    libraryID,
+    ids,
+    () => {},
+    types as number[],
+  );
+}
+
 /** Delete the stored forms of `name` that no item uses any more. */
 async function purgeTag(name: string) {
   const ids = await tagIDsOf([name]);
@@ -145,13 +168,7 @@ async function renamePerItem(libraryID: number, from: string, to: string) {
   // Their items already got `to` above, as Zotero lists every form by name.
   const fromIDs = await tagIDsOf([from]);
   if (fromIDs.length > 1 && (await typesOf(libraryID, from)).length) {
-    await Zotero.Tags.removeFromLibrary(
-      libraryID,
-      fromIDs,
-      () => {},
-      // undefined = every type; typings require an array.
-      undefined as unknown as number[],
-    );
+    await removeTagIDs(libraryID, fromIDs);
   }
   await purgeTag(from);
 }
@@ -169,8 +186,9 @@ async function runRename(
   }
   const toTypes = await typesOf(libraryID, to);
 
-  const sourceColor = getColorOf(libraryID, from);
-  const targetColor = getColorOf(libraryID, to);
+  const colors = colorsByName(libraryID);
+  const sourceColor = colors.get(from);
+  const targetColor = colors.get(to);
   // Keep the target's own color: Zotero.Tags.rename would overwrite it with the source's.
   if (sourceColor && targetColor) await setColor(libraryID, from, false);
 
@@ -224,12 +242,10 @@ async function runRemove(
     return false;
   }
   log("remove", name, types);
-  await Zotero.Tags.removeFromLibrary(
+  await removeTagIDs(
     libraryID,
     await tagIDsOf([name]),
-    () => {},
-    // undefined = remove the whole tag (and its color); typings require an array.
-    (types === "all" ? undefined : types) as number[],
+    types === "all" ? undefined : types,
   );
   return true;
 }
@@ -257,8 +273,7 @@ function message(e: unknown): string {
  */
 export async function applyOps(opts: ApplyOptions): Promise<ApplyResult> {
   const { libraryID } = opts;
-  const guard = preflight(libraryID);
-  if (!guard.ok) throw new Error(`Cannot edit tags: ${guard.reason}`);
+  assertEditable(libraryID);
 
   const tasks = toTasks(opts.ops, opts.allTags);
   if (!tasks.length) {
@@ -301,7 +316,7 @@ export async function applyOps(opts: ApplyOptions): Promise<ApplyResult> {
     const check = preflight(libraryID);
     if (!check.ok) {
       status = "failed";
-      error = `Cannot edit tags: ${check.reason}`;
+      error = guardError(check.reason).message;
       break;
     }
     try {
@@ -425,8 +440,7 @@ async function moveJournal(
   const target = undoing ? journal.before : journal.after!;
   const expected = undoing ? journal.after : journal.before;
 
-  const guard = preflight(journal.libraryID);
-  if (!guard.ok) throw new Error(`Cannot edit tags: ${guard.reason}`);
+  assertEditable(journal.libraryID);
 
   const { libraryID } = journal;
   const names = journal.before.map((s) => s.name);
@@ -441,23 +455,7 @@ async function moveJournal(
     }
   }
 
-  // itemID -> (tag name -> type it must have afterwards, or null for "must not have")
-  const wanted = new Map<number, Map<string, TagType | null>>();
-  const want = (id: number, name: string, type: TagType | null) => {
-    const perItem = wanted.get(id) ?? new Map<string, TagType | null>();
-    perItem.set(name, type);
-    wanted.set(id, perItem);
-  };
-  const currentByName = new Map(current.map((s) => [s.name, s]));
-  for (const goal of target) {
-    const now = new Map(
-      (currentByName.get(goal.name)?.items ?? []).map((x) => [x.id, x.type]),
-    );
-    const then = new Map(goal.items.map((x) => [x.id, x.type]));
-    for (const [id, type] of then)
-      if (now.get(id) !== type) want(id, goal.name, type);
-    for (const id of now.keys()) if (!then.has(id)) want(id, goal.name, null);
-  }
+  const wanted = diffItems(current, target);
 
   log(undoing ? "undo" : "redo", journalID, `${wanted.size} items`);
   await editItems(libraryID, [...wanted.keys()], (item) => {
@@ -486,8 +484,7 @@ async function moveJournal(
     journal.undoneStatus = journal.status;
     journal.status = "undone";
   } else {
-    // Undone before redo existed: its original status was not kept.
-    journal.status = journal.undoneStatus ?? "done";
+    journal.status = journal.undoneStatus!;
     delete journal.undoneStatus;
   }
   await writeJournal(journal);

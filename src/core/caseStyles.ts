@@ -1,4 +1,4 @@
-import type { CaseOptions } from "./types";
+import type { CaseOptions, CaseStyle } from "./types";
 
 export const DEFAULT_SMALL_WORDS: readonly string[] = [
   "a",
@@ -23,20 +23,23 @@ export const DEFAULT_SMALL_WORDS: readonly string[] = [
 
 const WORD_RE = /[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N}'’]*/gu;
 
-/** Word separators of snake/kebab/camel/Pascal case, as in duplicateKey. */
-const SEPARATORS = /[\s_-]+/u;
+/** Word separators of snake/kebab/camel/Pascal case, also for duplicateKey. */
+export const SEPARATORS = /[\s_-]+/u;
+
+/** A lower→Upper camelCase boundary ("aB", "1B"); also for duplicateKey. */
+export const CAMEL_BOUNDARY = /(\p{Ll}|\p{N})(\p{Lu})/gu;
 
 /**
  * Split an identifier-like string into words: on whitespace, "_" and "-",
  * and on lower→Upper and ACRONYMWord boundaries. Other punctuation stays in
  * its word, so "C++ programming" and "C programming" never collide.
  */
-export function splitWords(input: string): string[] {
+function splitWords(input: string): string[] {
   return input
     .split(SEPARATORS)
     .flatMap((part) =>
       part
-        .replace(/(\p{Ll}|\p{N})(\p{Lu})/gu, "$1\u0000$2")
+        .replace(CAMEL_BOUNDARY, "$1\u0000$2")
         .replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, "$1\u0000$2")
         .split("\u0000"),
     )
@@ -93,24 +96,24 @@ function convertBody(body: string, opts: CaseOptions): string {
       return body.replace(WORD_RE, (word) => (keep(word) ? word : lower(word)));
     case "upper":
       return body.toUpperCase();
-    case "title": {
+    case "title":
+    case "sentence": {
+      // Both capitalize the first word. Title case also capitalizes every
+      // later one but the small words; sentence case lowers them.
       const small = new Set(
-        (opts.smallWords ?? DEFAULT_SMALL_WORDS).map((w) => lower(w)),
+        opts.style === "title"
+          ? (opts.smallWords ?? DEFAULT_SMALL_WORDS).map((w) => lower(w))
+          : [],
       );
       let index = 0;
       return body.replace(WORD_RE, (word) => {
         const first = index++ === 0;
         if (keep(word)) return word;
+        if (first) return capitalize(word);
         const lowered = lower(word);
-        return !first && small.has(lowered) ? lowered : capitalize(word);
-      });
-    }
-    case "sentence": {
-      let index = 0;
-      return body.replace(WORD_RE, (word) => {
-        const first = index++ === 0;
-        if (keep(word)) return word;
-        return first ? capitalize(word) : lower(word);
+        return opts.style === "sentence" || small.has(lowered)
+          ? lowered
+          : capitalize(word);
       });
     }
     case "camel":
@@ -122,18 +125,20 @@ function convertBody(body: string, opts: CaseOptions): string {
       // separators. A tag of separators only has no words: "".
       const [, lead, core, trail] = /^([_-]*)(.*?)([_-]*)$/su.exec(body)!;
       if (!/[^\s_-]/u.test(core)) return "";
-      return lead + convertIdentifier(core, opts, keep) + trail;
+      return (
+        lead + convertIdentifier(core, opts.style, keepAcronyms, keep) + trail
+      );
     }
   }
 }
 
 function convertIdentifier(
   body: string,
-  opts: CaseOptions,
+  style: CaseStyle,
+  keepAcronyms: boolean,
   keep: (word: string) => boolean,
 ): string {
-  const keepAcronyms = opts.keepAcronyms ?? true;
-  switch (opts.style) {
+  switch (style) {
     case "camel":
     case "pascal": {
       // Already a single camel/Pascal identifier: leave it alone. Re-splitting
@@ -145,7 +150,7 @@ function convertIdentifier(
       const start = body.replace(LEADING_SYMBOLS, "");
       const isIdentifier = !SEPARATORS.test(body);
       const startsRight =
-        opts.style === "camel"
+        style === "camel"
           ? /^\p{Ll}/u.test(start) ||
             (keepAcronyms && /^\p{Lu}{2}/u.test(start))
           : /^\p{Lu}/u.test(start);
@@ -153,7 +158,7 @@ function convertIdentifier(
       // Kept acronyms don't count as the leading camelCase word:
       // "LLM Framework Studies" -> "LLMframeworkStudies". Neither do words of
       // symbols only: "# to read" -> "#toRead".
-      let lowerNext = opts.style === "camel";
+      let lowerNext = style === "camel";
       return splitWords(body)
         .map((w) => {
           if (keep(w) || !hasWordChar(w)) return w;
@@ -163,14 +168,10 @@ function convertIdentifier(
         })
         .join("");
     }
-    case "snake":
-      return splitWords(body)
-        .map((w) => (keep(w) ? w : lower(w)))
-        .join("_");
     default:
       return splitWords(body)
         .map((w) => (keep(w) ? w : lower(w)))
-        .join("-");
+        .join(style === "snake" ? "_" : "-");
   }
 }
 

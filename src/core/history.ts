@@ -1,4 +1,4 @@
-import type { Task } from "./tasks";
+import { getOrCreate } from "./collections";
 import type { TagType } from "./types";
 
 /** Which tab a run came from; shown in the History tab. */
@@ -11,25 +11,28 @@ interface ItemsOfTag {
 }
 
 /**
- * The run's kind. Journals written before it was recorded are classified by
- * their tasks; a case change then reads as a rename, as nothing else tells
- * them apart.
+ * What turns the tags of `from` into those of `to`, for each name of `to`:
+ * itemID -> (tag name -> the type the item must have, or null for "must not
+ * have the tag"). Names missing from `from` count as unused there.
  */
-export function editKindOf(journal: {
-  kind?: EditKind;
-  tasks: readonly Task[];
-}): EditKind {
-  if (journal.kind) return journal.kind;
-  const { tasks } = journal;
-  if (tasks.length && tasks.every((t) => t.kind === "remove")) return "remove";
-  if (tasks.some((t) => t.kind === "retype")) return "duplicates";
-  const targets = new Set<string>();
-  for (const t of tasks) {
-    if (t.kind !== "rename") continue;
-    if (targets.has(t.to)) return "merge";
-    targets.add(t.to);
+export function diffItems(
+  from: readonly ItemsOfTag[],
+  to: readonly ItemsOfTag[],
+): Map<number, Map<string, TagType | null>> {
+  const fromByName = new Map(from.map((s) => [s.name, s]));
+  const changes = new Map<number, Map<string, TagType | null>>();
+  const set = (id: number, name: string, type: TagType | null) =>
+    getOrCreate(changes, id, () => new Map()).set(name, type);
+  for (const goal of to) {
+    const now = new Map(
+      (fromByName.get(goal.name)?.items ?? []).map((x) => [x.id, x.type]),
+    );
+    const then = new Map(goal.items.map((x) => [x.id, x.type]));
+    for (const [id, type] of then)
+      if (now.get(id) !== type) set(id, goal.name, type);
+    for (const id of now.keys()) if (!then.has(id)) set(id, goal.name, null);
   }
-  return "rename";
+  return changes;
 }
 
 /**
@@ -45,17 +48,7 @@ export function affectedItemCount(
   if (!after) {
     return new Set(before.flatMap((s) => s.items.map((x) => x.id))).size;
   }
-  const afterByName = new Map(after.map((s) => [s.name, s]));
-  const changed = new Set<number>();
-  for (const was of before) {
-    const now = new Map(
-      (afterByName.get(was.name)?.items ?? []).map((x) => [x.id, x.type]),
-    );
-    const then = new Map(was.items.map((x) => [x.id, x.type]));
-    for (const [id, type] of then) if (now.get(id) !== type) changed.add(id);
-    for (const id of now.keys()) if (!then.has(id)) changed.add(id);
-  }
-  return changed.size;
+  return diffItems(after, before).size;
 }
 
 /** The parts of a History entry the undo and redo chains need. */

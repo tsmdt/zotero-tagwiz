@@ -1,3 +1,4 @@
+import { getOrCreate } from "../core/collections";
 import { cleanName } from "../core/normalize";
 import type { TagRef, TagType } from "../core/types";
 
@@ -6,7 +7,7 @@ export interface Scope {
   includeSubcollections: boolean;
 }
 
-export interface TagColor {
+interface TagColor {
   name: string;
   color: string;
 }
@@ -60,13 +61,16 @@ export function getColorList(libraryID: number): TagColor[] {
   }));
 }
 
-export function getColorOf(
+/** getColorList by name, with each color's position in the list. */
+export function colorsByName(
   libraryID: number,
-  name: string,
-): { color: string; position: number } | undefined {
-  const list = getColorList(libraryID);
-  const position = list.findIndex((x) => x.name === name);
-  return position < 0 ? undefined : { color: list[position].color, position };
+): Map<string, { color: string; position: number }> {
+  return new Map(
+    getColorList(libraryID).map((x, position) => [
+      x.name,
+      { color: x.color, position },
+    ]),
+  );
 }
 
 /**
@@ -94,10 +98,9 @@ async function tagIDsByName(
   /** Spelling looked up in SQL -> the name it belongs to. */
   const nameOf = new Map<string, string>();
   for (const name of names) {
-    const set = ids.get(name) ?? new Set<number>();
+    const set = getOrCreate(ids, name, () => new Set());
     const known = Zotero.Tags.getID(name);
     if (known) set.add(known);
-    ids.set(name, set);
     nameOf.set(name, name);
     nameOf.set(name.normalize("NFD"), name);
   }
@@ -132,35 +135,10 @@ export async function typesOf(
 }
 
 /**
- * All item IDs (trash included) that carry `name`, with the type on each.
- * An item carrying two stored forms of the name counts once, as manual if
- * either is manual.
- */
-export async function itemsWithTag(
-  libraryID: number,
-  name: string,
-): Promise<Array<{ id: number; type: TagType }>> {
-  const ids = await tagIDsOf([name]);
-  if (!ids.length) return [];
-  const rows = await query(
-    "SELECT it.itemID AS itemID, it.type AS type FROM itemTags it " +
-      "JOIN items i USING (itemID) " +
-      `WHERE it.tagID IN (${placeholders(ids.length)}) AND i.libraryID=? ` +
-      "ORDER BY it.itemID",
-    [...ids, libraryID],
-  );
-  const types = new Map<number, TagType>();
-  for (const r of rows) {
-    const id = r.itemID as number;
-    const type: TagType = r.type ? 1 : 0;
-    types.set(id, Math.min(types.get(id) ?? type, type) as TagType);
-  }
-  return [...types].map(([id, type]) => ({ id, type }));
-}
-
-/**
- * Snapshot of the given tag names: membership, types and colors. Same result
- * as itemsWithTag per name, in a few chunked queries instead of two per name.
+ * Snapshot of the given tag names: membership, types and colors. `items` are
+ * every item (trash included) that carries the name, ordered by ID, with the
+ * type on each. An item carrying two stored forms of a name counts once, as
+ * manual if either is manual.
  */
 export async function captureStates(
   libraryID: number,
@@ -182,26 +160,29 @@ export async function captureStates(
     );
     for (const r of rows) {
       const name = nameOfID.get(r.tagID as number)!;
-      const types = typesByName.get(name) ?? new Map<number, TagType>();
+      const types = getOrCreate(typesByName, name, () => new Map());
       const id = r.itemID as number;
       const type: TagType = r.type ? 1 : 0;
       types.set(id, Math.min(types.get(id) ?? type, type) as TagType);
-      typesByName.set(name, types);
     }
   }
 
-  const colors = getColorList(libraryID);
-  return names.map((name) => {
-    const position = colors.findIndex((x) => x.name === name);
-    return {
-      name,
-      items: [...(typesByName.get(name) ?? [])]
-        .sort((a, b) => a[0] - b[0])
-        .map(([id, type]) => ({ id, type })),
-      color:
-        position < 0 ? undefined : { color: colors[position].color, position },
-    };
-  });
+  const colors = colorsByName(libraryID);
+  return names.map((name) => ({
+    name,
+    items: [...(typesByName.get(name) ?? [])]
+      .sort((a, b) => a[0] - b[0])
+      .map(([id, type]) => ({ id, type })),
+    color: colors.get(name),
+  }));
+}
+
+/** The items of `name`'s snapshot (see captureStates). */
+export async function itemsWithTag(
+  libraryID: number,
+  name: string,
+): Promise<TagState["items"]> {
+  return (await captureStates(libraryID, [name]))[0].items;
 }
 
 /**
@@ -242,14 +223,15 @@ function scopeItemsSql(scope: Scope): string {
 }
 
 /**
- * Tags of a library with usage counts and colors. With a scope, only tags used
- * by (non-trashed) items of that collection are returned; `itemCount` stays
- * library-wide because edits are library-wide.
+ * Tags of a library with usage counts and colors: `all` of them, and the ones
+ * `listed` for the scope, i.e. used by (non-trashed) items of the collection
+ * (all of them without a scope). With a scope, every tag's `scopeCount` is
+ * set; `itemCount` stays library-wide because edits are library-wide.
  */
-export async function loadTags(
+export async function loadTagsWithScope(
   libraryID: number,
   scope?: Scope,
-): Promise<TagRef[]> {
+): Promise<{ all: TagRef[]; listed: TagRef[] }> {
   const totalRows = await query(
     "SELECT t.name AS name, it.type AS type, COUNT(DISTINCT it.itemID) AS n " +
       "FROM itemTags it JOIN tags t USING (tagID) JOIN items i USING (itemID) " +
@@ -257,10 +239,7 @@ export async function loadTags(
     [libraryID],
   );
 
-  const colors = getColorList(libraryID);
-  const colorByName = new Map(
-    colors.map((x, position) => [x.name, { color: x.color, position }]),
-  );
+  const colors = colorsByName(libraryID);
 
   const scopeCounts = new Map<string, number>();
   if (scope) {
@@ -285,28 +264,33 @@ export async function loadTags(
     const name = cleanName(r.name as string);
     const type: TagType = r.type ? 1 : 0;
     const key = `${name}\u0000${type}`;
-    const scopeCount = scope ? (scopeCounts.get(key) ?? 0) : undefined;
-    if (scope && !scopeCount) continue;
     const existing = byKey.get(key);
     if (existing) {
       existing.itemCount += r.n as number;
       continue;
     }
-    const color = colorByName.get(name);
     byKey.set(key, {
       name,
       type,
       itemCount: r.n as number,
-      scopeCount,
-      color: color?.color,
-      position: color?.position,
+      scopeCount: scope ? (scopeCounts.get(key) ?? 0) : undefined,
+      color: colors.get(name)?.color,
     });
   }
-  return [...byKey.values()].sort(
+  const all = [...byKey.values()].sort(
     (a, b) =>
       a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) ||
       a.type - b.type,
   );
+  return { all, listed: scope ? all.filter((t) => t.scopeCount) : all };
+}
+
+/** The tags listed for the scope (see loadTagsWithScope). */
+export async function loadTags(
+  libraryID: number,
+  scope?: Scope,
+): Promise<TagRef[]> {
+  return (await loadTagsWithScope(libraryID, scope)).listed;
 }
 
 /**
