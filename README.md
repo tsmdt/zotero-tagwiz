@@ -79,7 +79,7 @@ It works like undo and redo in a text editor. Select an edit you have made and p
 - On an edit that was already done, Apply **undoes** it: the tags return to how they were just before it. Every later run is undone too, newest first, so undoing an older run rolls the library back to that point.
 - On an edit that you have undone, Apply **redoes** it. Older undone runs are redone first, oldest first.
 
-Undone runs stay at the top of the list, dimmed. The pane on the right says what Apply will do, e.g. "Undoing 4 edits." 
+Undone runs stay at the top of the list, dimmed. The pane on the right says what Apply will do, e.g. "Undoing 4 edits."
 
 > [!note]
 > **A new edit discards all undone runs**: they are deleted and can no longer be redone.
