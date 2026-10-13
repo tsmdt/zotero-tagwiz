@@ -567,6 +567,11 @@ tr.tw-blocked-row {
   background: var(--tw-selected);
 }
 
+/* Tag and History rows: a click anywhere selects the row (src/ui/dialog.ts). */
+.tw-table tbody tr.tw-clickable-row {
+  cursor: pointer;
+}
+
 /* ---------------------------------------------------------------------------
  * History tab: one row per kept edit. The row selected for Apply is blue
  * (tw-row-selected, above); undone edits are dimmed.
