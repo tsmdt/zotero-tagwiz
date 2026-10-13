@@ -14,7 +14,8 @@ In other words: its a plugin for cleaning up tags in bulk: change their case, re
   - [Rename & Merge](#rename--merge)
   - [Remove](#remove)
   - [Duplicates](#duplicates)
-  - [Undo & History](#undo--history)
+  - [History](#history)
+    - [Undo/Redo](#undoredo)
 - [Compatibility](#compatibility)
 - [Development](#development)
 - [License](#license)
@@ -27,12 +28,12 @@ In other words: its a plugin for cleaning up tags in bulk: change their case, re
 
 ## Usage
 
-Open TagWiz from the **Tools** menu, or right-click a collection and choose **TagWiz 🏷️**. The window lists the tags used in the selected collection (including on its items' notes, attachments and annotations), or all tags if a library is selected. Tick **Include subcollections** to count items in subcollections too.
+Open TagWiz from the **Tools** menu, or right-click a collection and choose **TagWiz 🏷️**.
+
+The window lists the tags used in the selected collection (including on its items' notes, attachments and annotations), or all tags if a library is selected. Tick **Include subcollections** to count items in subcollections too.
 
 > [!important]
-> **Every change applies to the whole library**, including items outside the currently selected collection (as well as items in the trash). The preview says how many items are affected (items that only carry a merge target are not counted: they don't change) and how many of them are outside the collection.
-
-Pick a tab, select tags (the filter box helps with long lists), check the preview, untick anything you do not want, and press **Apply**. The bottom of the window shows how many unique tags the library or collection has; a tag used both manually and automatically counts once. To empty a text field at once, click the **×** at its right end.
+> **Every change applies to the whole library**, including items outside the currently selected collection (as well as items in the trash). The preview says how many items are affected and how many of them are outside the collection.
 
 ### Change Case
 
@@ -51,7 +52,7 @@ Select one tag to rename it, or two or more to merge them, then type or pick the
 
 ### Remove
 
-Select tags and apply to delete them from every item. Tags that have a color lose it, and the preview says so. Tags selected on another tab are not carried over to this one, and the confirmation lists the tags it removes.
+Select tags and apply to delete them from every item.
 
 ### Duplicates
 
@@ -61,24 +62,27 @@ Choose how strict the match is:
 - **Ignoring case**: `Machine Learning` and `machine learning`.
 - **Ignoring case, accents, spaces, "-" and "\_"**: also treats `machine-learning`, `machine_learning` and `machineLearning` as the same, and `café` as `cafe`. Only accents on Latin and Greek letters are ignored; in other scripts such marks tell letters apart (Japanese `が` and `か` stay different).
 
-Each group suggests a spelling to keep (the most used one); pick another one with the radio buttons, or untick the group to skip it. If the name you keep is used both as a manual and an automatic tag, the merged tags become manual. Below the groups, **Possible typos and plurals** lists near-matches, which are never merged automatically. **Merge…** sends a pair to the Rename & Merge tab so you can decide.
+Each group suggests a spelling to keep (the most used one); pick another one with the radio buttons, or untick the group to skip it. If the name you keep is used both as a manual and an automatic tag, the merged tags become manual.
 
-### Undo & History
+Below the groups, **Possible typos and plurals** lists near-matches, which are never merged automatically. **Merge** sends a pair to the Rename & Merge tab so you can decide.
+
+### History
 
 Before the first change of every run, TagWiz saves a snapshot of the affected tags in a `tagwiz` folder inside your Zotero data directory. A snapshot holds which items carry the tags, their manual or automatic type and their colors. TagWiz keeps the snapshots of the last 10 runs of each library.
 
-The **History** tab lists every kept run of the library, newest first, with its date (`YYYY-MM-DD`), time (`HH:MM:SS`), type of edit (Change case, Rename, Merge, Clean duplicates or Remove) and the number of items whose tags it changed. Runs made before TagWiz recorded the type of edit show a case change as Rename.
+The **History** tab lists every kept run of the library, newest first, with its date (`YYYY-MM-DD`), time (`HH:MM:SS`), type of edit (Change case, Rename, Merge, Clean duplicates or Remove) and the number of items whose tags it changed.
 
-It works like undo and redo in a text editor. Select a run (it turns blue) and press **Apply**:
+#### Undo/Redo
 
-- On a run that is applied, Apply **undoes** it: the tags return to how they were just before it. Every later run is undone too, newest first, so undoing an older run rolls the library back to that point.
-- On a run that is undone, Apply **redoes** it. Older undone runs are redone first, oldest first.
+It works like undo and redo in a text editor. Select an edit you have made and press **Apply**:
 
-Undone runs stay at the top of the list, dimmed. The pane on the right says what Apply will do, e.g. "Undoing 4 edits." **A new edit discards the undone runs**: they are deleted and can no longer be redone. A run that was interrupted (for example by a crash) can be undone but not redone.
+- On an edit that was already done, Apply **undoes** it: the tags return to how they were just before it. Every later run is undone too, newest first, so undoing an older run rolls the library back to that point.
+- On an edit that you have undone, Apply **redoes** it. Older undone runs are redone first, oldest first.
 
-If a run's tags were changed in the meantime (for example by a sync), TagWiz lists them and asks before overwriting them; the overwritten changes cannot be brought back. It asks for each run separately; saying no stops there, and the runs undone or redone so far stay that way.
+Undone runs stay at the top of the list, dimmed. The pane on the right says what Apply will do, e.g. "Undoing 4 edits." 
 
-Manual and automatic tags keep their type, and tag colors move with the tag. Changes sync like any other edit, so wait for a running sync to finish before editing tags, and keep a backup of your Zotero data before the first big run.
+> [!note]
+> **A new edit discards all undone runs**: they are deleted and can no longer be redone.
 
 ## Compatibility
 
